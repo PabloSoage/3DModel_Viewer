@@ -1,0 +1,276 @@
+{% extends "base.html" %}
+
+{% block title %}Models - 3D Model Viewer{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-6">
+        <h1 class="mb-0">3D Models</h1>
+    </div>
+    <div class="col-md-6 text-end">
+        <div class="btn-group">
+            <button class="btn btn-outline-primary" id="refresh-button">
+                <i class="bi bi-arrow-clockwise"></i> Refresh
+            </button>
+            <button class="btn btn-outline-secondary" id="toggle-view-button" data-view="grid">
+                <i class="bi bi-list"></i> List View
+            </button>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4" id="models-grid-container">
+    <!-- Models will be loaded dynamically here -->
+    <div class="col-12 text-center py-5">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <p class="mt-2 text-muted">Loading models...</p>
+    </div>
+</div>
+
+<!-- Template for grid card view -->
+<template id="model-card-template">
+    <div class="col-md-4 col-sm-6 mb-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title model-name"></h5>
+                <p class="card-text model-description text-muted"></p>
+                <div class="model-preview-container text-center mb-3">
+                    <!-- Preview image will be inserted here if available -->
+                </div>
+            </div>
+            <div class="card-footer bg-transparent">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <a href="#" class="btn btn-primary btn-sm explore-model-btn">
+                            <i class="bi bi-folder2-open"></i> Explore
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+
+<!-- Template for list view row -->
+<template id="model-row-template">
+    <div class="col-12 mb-2">
+        <div class="card">
+            <div class="card-body py-2">
+                <div class="row align-items-center">
+                    <div class="col-md-6 col-sm-8">
+                        <h5 class="mb-0 model-name"></h5>
+                        <small class="text-muted model-description"></small>
+                    </div>
+                    <div class="col-md-6 col-sm-4 text-sm-end mt-2 mt-sm-0">
+                        <a href="#" class="btn btn-primary btn-sm me-1 explore-model-btn">
+                            <i class="bi bi-folder2-open"></i> Explore
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+
+<!-- Template for no models found -->
+<template id="no-models-template">
+    <div class="col-12 text-center py-5">
+        <div class="display-1 text-muted mb-3">
+            <i class="bi bi-emoji-neutral"></i>
+        </div>
+        <h4 class="text-muted">No models available</h4>
+        <p class="text-muted">
+            You don't have access to any 3D models yet. Contact the administrator to request access.
+        </p>
+    </div>
+</template>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Authentication check
+        const token = localStorage.getItem('token');
+        if (!token) {
+            window.location.href = '/login';
+            return;
+        }
+
+        const modelsContainer = document.getElementById('models-grid-container');
+        const toggleViewBtn = document.getElementById('toggle-view-button');
+        const refreshButton = document.getElementById('refresh-button');
+        const modelCardTemplate = document.getElementById('model-card-template');
+        const modelRowTemplate = document.getElementById('model-row-template');
+        const noModelsTemplate = document.getElementById('no-models-template');
+        
+        let currentView = 'grid'; // Default view is grid
+        
+        // Load models
+        async function loadModels() {
+            try {
+                const response = await fetch('/api/v1/models', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        localStorage.removeItem('token');
+                        window.location.href = '/login';
+                        return;
+                    }
+                    throw new Error('Failed to load models');
+                }
+                
+                const allModels = await response.json();
+                renderModels(allModels);
+            } catch (error) {
+                console.error('Error loading models:', error);
+                showToast('Failed to load models: ' + error.message, 'danger');
+                modelsContainer.innerHTML = `
+                    <div class="col-12 text-center py-5">
+                        <div class="alert alert-danger">
+                            <i class="bi bi-exclamation-triangle-fill"></i> Failed to load models: ${error.message}
+                        </div>
+                        <button class="btn btn-primary" onclick="location.reload()">Try Again</button>
+                    </div>
+                `;
+            }
+        }
+
+        // Render models based on current view
+        function renderModels(models) {
+            modelsContainer.innerHTML = '';
+            
+            if (!models.length) {
+                modelsContainer.appendChild(noModelsTemplate.content.cloneNode(true));
+                return;
+            }
+            
+            models.forEach(model => {
+                if (currentView === 'grid') {
+                    const modelCard = modelCardTemplate.content.cloneNode(true);
+                    modelCard.querySelector('.model-name').textContent = model.name;
+                    modelCard.querySelector('.model-description').textContent = model.description || 'No description available';
+                    
+                    const exploreBtn = modelCard.querySelector('.explore-model-btn');
+                    exploreBtn.href = `/explorer/${model.id}`;
+                    
+                    // Add model preview placeholder
+                    const previewContainer = modelCard.querySelector('.model-preview-container');
+                    previewContainer.innerHTML = `
+                        <div class="model-preview">
+                            <i class="bi bi-box display-1 text-muted"></i>
+                        </div>
+                    `;
+                    
+                    modelsContainer.appendChild(modelCard);
+                } else {
+                    const modelRow = modelRowTemplate.content.cloneNode(true);
+                    modelRow.querySelector('.model-name').textContent = model.name;
+                    modelRow.querySelector('.model-description').textContent = model.description || 'No description available';
+                    
+                    const exploreBtn = modelRow.querySelector('.explore-model-btn');
+                    exploreBtn.href = `/explorer/${model.id}`;
+                    
+                    modelsContainer.appendChild(modelRow);
+                }
+            });
+        }
+
+        // Toggle view between grid and list
+        toggleViewBtn.addEventListener('click', function() {
+            if (currentView === 'grid') {
+                currentView = 'list';
+                this.innerHTML = '<i class="bi bi-grid"></i> Grid View';
+                this.dataset.view = 'list';
+            } else {
+                currentView = 'grid';
+                this.innerHTML = '<i class="bi bi-list"></i> List View';
+                this.dataset.view = 'grid';
+            }
+            loadModels();
+        });
+
+        // Refresh button
+        refreshButton.addEventListener('click', function() {
+            loadModels();
+        });
+
+        // Check user role and redirect if admin
+        async function checkUserRole() {
+            try {
+                const response = await fetch('/api/v1/auth/me', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to fetch user information');
+                }
+                
+                const userData = await response.json();
+                
+                // If user is admin, show admin link
+                if (userData.is_admin) {
+                    const adminLink = document.createElement('div');
+                    adminLink.className = 'mb-3 text-end';
+                    adminLink.innerHTML = `
+                        <a href="/admin/models" class="btn btn-outline-primary">
+                            <i class="bi bi-gear"></i> Switch to Admin View
+                        </a>
+                    `;
+                    
+                    // Insert before the models container
+                    modelsContainer.parentNode.insertBefore(adminLink, modelsContainer);
+                }
+                
+            } catch (error) {
+                console.error('Error fetching user information:', error);
+                // Error handling - stay on this page but don't show admin links
+            }
+        }
+        
+        // Initial load
+        loadModels();
+        checkUserRole();
+    });
+
+    // Toast notification function
+    function showToast(message, type = 'info') {
+        const toastContainer = document.getElementById('toast-container');
+        if (!toastContainer) {
+            const container = document.createElement('div');
+            container.id = 'toast-container';
+            container.className = 'toast-container position-fixed bottom-0 end-0 p-3';
+            document.body.appendChild(container);
+        }
+        
+        const toastId = 'toast-' + Date.now();
+        const html = `
+            <div id="${toastId}" class="toast align-items-center text-white bg-${type} border-0" role="alert" aria-live="assertive" aria-atomic="true">
+                <div class="d-flex">
+                    <div class="toast-body">
+                        ${message}
+                    </div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                </div>
+            </div>
+        `;
+        
+        document.getElementById('toast-container').insertAdjacentHTML('beforeend', html);
+        const toastElement = document.getElementById(toastId);
+        const toast = new bootstrap.Toast(toastElement);
+        toast.show();
+        
+        // Auto-remove toast after it's hidden
+        toastElement.addEventListener('hidden.bs.toast', function() {
+            this.remove();
+        });
+    }
+</script>
+{% endblock %}

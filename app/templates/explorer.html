@@ -1,0 +1,940 @@
+{% extends "base.html" %}
+
+{% block title %}Explorer - 3D Model Viewer{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.css">
+<style>
+    .file-browser {
+        height: calc(100vh - 250px);
+        min-height: 400px;
+        overflow-y: auto;
+        border: 1px solid #dee2e6;
+        border-radius: 0.25rem;
+    }
+    
+    .directory-item, .file-item {
+        cursor: pointer;
+        padding: 8px 12px;
+        border-bottom: 1px solid #f1f1f1;
+        transition: background-color 0.2s;
+    }
+    
+    .directory-item:hover, .file-item:hover {
+        background-color: #f8f9fa;
+    }
+    
+    .directory-item i, .file-item i {
+        margin-right: 8px;
+    }
+    
+    .preview-container {
+        height: calc(100vh - 250px);
+        min-height: 400px;
+        border: 1px solid #dee2e6;
+        border-radius: 0.25rem;
+        overflow: hidden;
+        position: relative;
+        background-color: #f8f9fa;
+    }
+    
+    #file-preview {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+    }
+    
+    #stl-viewer {
+        width: 100%;
+        height: 100%;
+    }
+    
+    .model-title {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    
+    .breadcrumb-item {
+        max-width: 150px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    
+    .preview-loading {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: rgba(255, 255, 255, 0.8);
+        z-index: 10;
+    }
+    
+    .action-buttons {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        z-index: 100;
+    }
+    
+    .file-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 8px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row align-items-center mb-4">
+    <div class="col">
+        <h1 class="model-title" id="model-name">Loading model...</h1>
+    </div>
+    <div class="col-auto">
+        <a href="/models" class="btn btn-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Models
+        </a>
+    </div>
+</div>
+
+<nav aria-label="breadcrumb" class="mb-4">
+    <ol class="breadcrumb" id="path-breadcrumb">
+        <li class="breadcrumb-item"><a href="#" data-path="" id="root-path">Root</a></li>
+        <li class="breadcrumb-item active">Loading...</li>
+    </ol>
+</nav>
+
+<div class="row">
+    <div class="col-lg-4">
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Files</h5>
+                <div class="btn-group">
+                    <button class="btn btn-sm btn-outline-secondary" id="refresh-button">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" id="download-folder-button">
+                        <i class="bi bi-download"></i> Download Folder
+                    </button>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div class="file-browser" id="file-browser">
+                    <div class="text-center py-5">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-muted">Loading files...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Media Gallery</h5>
+            </div>
+            <div class="card-body">
+                <div class="media-gallery" id="media-gallery">
+                    <div class="text-center py-3">
+                        <div class="spinner-border spinner-border-sm text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-muted small">Loading media files...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0" id="preview-title">Preview</h5>
+                <div id="file-action-buttons" class="d-none">
+                    <button class="btn btn-sm btn-outline-secondary me-2" id="download-file-button">
+                        <i class="bi bi-download"></i> Download
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" id="view-file-button">
+                        <i class="bi bi-file-text"></i> View Text
+                    </button>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div class="preview-container">
+                    <div class="preview-loading" id="preview-loading">
+                        <div>
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2 text-muted">Select a file to preview</p>
+                        </div>
+                    </div>
+                    
+                    <div class="action-buttons" id="stl-viewer-buttons" style="display: none;">
+                        <div class="btn-group">
+                            <button class="btn btn-sm btn-light" id="reset-view-button"><i class="bi bi-house"></i></button>
+                            <button class="btn btn-sm btn-light" id="rotate-button"><i class="bi bi-arrow-repeat"></i></button>
+                            <button class="btn btn-sm btn-light" id="wireframe-button"><i class="bi bi-grid-3x3"></i></button>
+                        </div>
+                    </div>
+                    
+                    <img id="file-preview" style="display: none;" />
+                    <div id="stl-viewer" style="display: none;"></div>
+                    <div id="text-viewer" style="display: none; padding: 15px; height: 100%; overflow: auto;">
+                        <pre id="text-content" style="white-space: pre-wrap;"></pre>
+                    </div>
+                    <div id="empty-preview" class="d-flex align-items-center justify-content-center h-100">
+                        <div class="text-center">
+                            <div class="display-1 text-muted">
+                                <i class="bi bi-file-earmark"></i>
+                            </div>
+                            <h5 class="text-muted mt-3">Select a file to preview</h5>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Text File Viewer Modal -->
+<div class="modal fade" id="textViewerModal" tabindex="-1" aria-labelledby="textViewerModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="textViewerModalLabel">File Viewer</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <pre id="modal-text-content" style="white-space: pre-wrap;"></pre>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" id="download-text-file-button">Download</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/loaders/STLLoader.js"></script>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Check for authentication
+        const token = localStorage.getItem('token');
+        if (!token) {
+            window.location.href = '/login';
+            return;
+        }
+        
+        // Get model ID from URL path
+        const pathParts = window.location.pathname.split('/');
+        const modelId = pathParts[pathParts.length - 1];
+        
+        // Elements
+        const fileBrowser = document.getElementById('file-browser');
+        const mediaGallery = document.getElementById('media-gallery');
+        const modelNameElement = document.getElementById('model-name');
+        const pathBreadcrumb = document.getElementById('path-breadcrumb');
+        const refreshButton = document.getElementById('refresh-button');
+        const downloadFolderButton = document.getElementById('download-folder-button');
+        const downloadFileButton = document.getElementById('download-file-button');
+        const viewFileButton = document.getElementById('view-file-button');
+        const filePreview = document.getElementById('file-preview');
+        const stlViewer = document.getElementById('stl-viewer');
+        const textViewer = document.getElementById('text-viewer');
+        const textContent = document.getElementById('text-content');
+        const modalTextContent = document.getElementById('modal-text-content');
+        const emptyPreview = document.getElementById('empty-preview');
+        const previewLoading = document.getElementById('preview-loading');
+        const previewTitle = document.getElementById('preview-title');
+        const fileActionButtons = document.getElementById('file-action-buttons');
+        const stlViewerButtons = document.getElementById('stl-viewer-buttons');
+        const resetViewButton = document.getElementById('reset-view-button');
+        const rotateButton = document.getElementById('rotate-button');
+        const wireframeButton = document.getElementById('wireframe-button');
+        const rootPathLink = document.getElementById('root-path');
+        const textViewerModal = document.getElementById('textViewerModal');
+        const textViewerModalLabel = document.getElementById('textViewerModalLabel');
+        const downloadTextFileButton = document.getElementById('download-text-file-button');
+        
+        // Variables
+        let currentPath = '';
+        let currentModelData = null;
+        let currentFile = null;
+        let rotating = false;
+        let wireframe = false;
+        let scene, camera, renderer, controls, mesh;
+        
+        // Load model data
+        async function loadModelData() {
+            try {
+                const response = await fetch(`/api/v1/models/${modelId}`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        localStorage.removeItem('token');
+                        window.location.href = '/login';
+                        return;
+                    }
+                    throw new Error('Failed to load model data');
+                }
+                
+                currentModelData = await response.json();
+                modelNameElement.textContent = currentModelData.name;
+                currentPath = currentModelData.path;
+                rootPathLink.dataset.path = currentPath;
+                
+                // Load initial directory
+                loadDirectory(currentPath);
+                loadMediaFiles(currentPath);
+                
+            } catch (error) {
+                console.error('Error loading model data:', error);
+                showToast('Failed to load model data: ' + error.message, 'danger');
+            }
+        }
+        
+        // Load directory contents
+        async function loadDirectory(path) {
+            fileBrowser.innerHTML = `
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2 text-muted">Loading files...</p>
+                </div>
+            `;
+            
+            try {
+                const response = await fetch(`/api/v1/explorer/list/?path=${encodeURIComponent(path)}`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to load directory contents');
+                }
+                
+                const data = await response.json();
+                
+                // Update current path
+                currentPath = data.path;
+                
+                // Update breadcrumb
+                updateBreadcrumb(data.path, data.parent_path);
+                
+                // Clear browser
+                fileBrowser.innerHTML = '';
+                
+                // Show parent directory if exists
+                if (data.parent_path) {
+                    const parentItem = document.createElement('div');
+                    parentItem.className = 'directory-item';
+                    parentItem.innerHTML = `<i class="bi bi-arrow-up-circle"></i> ..`;
+                    parentItem.addEventListener('click', () => loadDirectory(data.parent_path));
+                    fileBrowser.appendChild(parentItem);
+                }
+                
+                // First show directories, then files
+                const dirs = data.items.filter(item => item.is_dir);
+                const files = data.items.filter(item => !item.is_dir);
+                
+                // Add directories
+                dirs.forEach(item => {
+                    const dirItem = document.createElement('div');
+                    dirItem.className = 'directory-item';
+                    dirItem.innerHTML = `<i class="bi bi-folder"></i> ${item.name}`;
+                    dirItem.addEventListener('click', () => loadDirectory(item.path));
+                    fileBrowser.appendChild(dirItem);
+                });
+                
+                // Add files
+                files.forEach(item => {
+                    const fileItem = document.createElement('div');
+                    fileItem.className = 'file-item';
+                    
+                    // Choose appropriate icon based on file extension
+                    let icon = 'bi-file';
+                    const extension = item.name.split('.').pop().toLowerCase();
+                    
+                    if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes(extension)) {
+                        icon = 'bi-file-image';
+                    } else if (['mp4', 'webm', 'avi', 'mov'].includes(extension)) {
+                        icon = 'bi-file-play';
+                    } else if (['stl', 'obj', '3ds', 'fbx'].includes(extension)) {
+                        icon = 'bi-cube';
+                    } else if (['txt', 'md', 'log', 'json'].includes(extension)) {
+                        icon = 'bi-file-text';
+                    } else if (['zip', '7z', 'rar', 'tar', 'gz'].includes(extension)) {
+                        icon = 'bi-file-zip';
+                    }
+                    
+                    fileItem.innerHTML = `<i class="bi ${icon}"></i> ${item.name}`;
+                    fileItem.addEventListener('click', () => handleFileClick(item));
+                    fileBrowser.appendChild(fileItem);
+                });
+                
+                // Show empty message if no items
+                if (data.items.length === 0) {
+                    fileBrowser.innerHTML = `
+                        <div class="text-center py-5">
+                            <div class="text-muted">
+                                <i class="bi bi-folder2-open"></i>
+                            </div>
+                            <p class="text-muted">Empty folder</p>
+                        </div>
+                    `;
+                }
+                
+            } catch (error) {
+                console.error('Error loading directory:', error);
+                fileBrowser.innerHTML = `
+                    <div class="alert alert-danger m-3">
+                        <i class="bi bi-exclamation-triangle-fill"></i> ${error.message}
+                    </div>
+                `;
+            }
+        }
+        
+        // Load media files in the directory
+        async function loadMediaFiles(path) {
+            mediaGallery.innerHTML = `
+                <div class="text-center py-3">
+                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2 text-muted small">Loading media files...</p>
+                </div>
+            `;
+            
+            try {
+                const response = await fetch(`/api/v1/explorer/media-files/?path=${encodeURIComponent(path)}`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to load media files');
+                }
+                
+                const mediaFiles = await response.json();
+                
+                mediaGallery.innerHTML = '';
+                
+                if (mediaFiles.length === 0) {
+                    mediaGallery.innerHTML = `
+                        <div class="text-center py-3">
+                            <div class="text-muted">
+                                <i class="bi bi-images"></i>
+                            </div>
+                            <p class="text-muted small">No media files found</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                // Create a simple gallery grid
+                const galleryRow = document.createElement('div');
+                galleryRow.className = 'row g-2';
+                
+                mediaFiles.slice(0, 12).forEach(file => {
+                    const isImage = file.media_type && file.media_type.startsWith('image/');
+                    
+                    if (isImage) {
+                        const col = document.createElement('div');
+                        col.className = 'col-4 col-sm-4 mb-2';
+                        
+                        const img = document.createElement('img');
+                        img.src = `/api/v1/files/download?path=${encodeURIComponent(file.path)}`;
+                        img.className = 'img-fluid rounded cursor-pointer';
+                        img.style.height = '60px';
+                        img.style.width = '100%';
+                        img.style.objectFit = 'cover';
+                        img.title = file.name;
+                        img.alt = file.name;
+                        img.addEventListener('click', () => handleFileClick(file));
+                        
+                        col.appendChild(img);
+                        galleryRow.appendChild(col);
+                    }
+                });
+                
+                mediaGallery.appendChild(galleryRow);
+                
+                // If there are more media files than shown in the preview
+                if (mediaFiles.length > 12) {
+                    const moreLink = document.createElement('div');
+                    moreLink.className = 'text-center mt-2';
+                    moreLink.innerHTML = `
+                        <small><a href="#" class="text-muted">+${mediaFiles.length - 12} more files</a></small>
+                    `;
+                    mediaGallery.appendChild(moreLink);
+                }
+                
+            } catch (error) {
+                console.error('Error loading media files:', error);
+                mediaGallery.innerHTML = `
+                    <div class="alert alert-danger m-3">
+                        <small><i class="bi bi-exclamation-triangle-fill"></i> ${error.message}</small>
+                    </div>
+                `;
+            }
+        }
+        
+        // Update breadcrumb navigation
+        function updateBreadcrumb(currentPath, parentPath) {
+            // Clear existing breadcrumb items except home
+            while (pathBreadcrumb.children.length > 1) {
+                pathBreadcrumb.removeChild(pathBreadcrumb.lastChild);
+            }
+            
+            if (currentPath === currentModelData.path) {
+                // At root level
+                const rootItem = document.createElement('li');
+                rootItem.className = 'breadcrumb-item active';
+                rootItem.textContent = 'Root';
+                pathBreadcrumb.appendChild(rootItem);
+                return;
+            }
+            
+            // Create path segments
+            let relativePath = currentPath.substring(currentModelData.path.length);
+            if (relativePath.startsWith('/')) {
+                relativePath = relativePath.substring(1);
+            }
+            
+            const segments = relativePath.split('/');
+            let currentSegmentPath = currentModelData.path;
+            
+            segments.forEach((segment, index) => {
+                currentSegmentPath = currentSegmentPath + '/' + segment;
+                
+                const segmentItem = document.createElement('li');
+                segmentItem.className = 'breadcrumb-item';
+                
+                if (index === segments.length - 1) {
+                    segmentItem.className += ' active';
+                    segmentItem.textContent = segment;
+                } else {
+                    const link = document.createElement('a');
+                    link.href = '#';
+                    link.textContent = segment;
+                    link.dataset.path = currentSegmentPath;
+                    link.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        loadDirectory(e.target.dataset.path);
+                    });
+                    segmentItem.appendChild(link);
+                }
+                
+                pathBreadcrumb.appendChild(segmentItem);
+            });
+        }
+        
+        // Handle file click
+        function handleFileClick(file) {
+            currentFile = file;
+            previewTitle.textContent = file.name;
+            showPreviewLoading();
+            resetViewers();
+            fileActionButtons.classList.remove('d-none');
+            
+            const extension = file.name.split('.').pop().toLowerCase();
+            
+            if (file.media_type && file.media_type.startsWith('image/')) {
+                // Image preview
+                filePreview.src = `/api/v1/files/download?path=${encodeURIComponent(file.path)}`;
+                filePreview.onload = () => {
+                    filePreview.style.display = 'block';
+                    hidePreviewLoading();
+                };
+                filePreview.onerror = () => {
+                    showPreviewError('Failed to load image');
+                };
+                
+                // Show download button, hide view text button
+                downloadFileButton.style.display = 'inline-block';
+                viewFileButton.style.display = 'none';
+                
+            } else if (extension === 'stl') {
+                // STL preview
+                initThreeJS();
+                loadSTLFile(file.path);
+                
+                // Show download button, hide view text button
+                downloadFileButton.style.display = 'inline-block';
+                viewFileButton.style.display = 'none';
+                
+            } else if (['txt', 'md', 'json', 'log', 'html', 'xml', 'css', 'js'].includes(extension)) {
+                // Text file preview
+                viewTextFile(file.path);
+                
+                // Show both buttons
+                downloadFileButton.style.display = 'inline-block';
+                viewFileButton.style.display = 'inline-block';
+                
+            } else {
+                // Generic file (no preview)
+                emptyPreview.style.display = 'flex';
+                emptyPreview.innerHTML = `
+                    <div class="text-center">
+                        <div class="display-1 text-muted">
+                            <i class="bi bi-file-earmark"></i>
+                        </div>
+                        <h5 class="text-muted mt-3">${file.name}</h5>
+                        <p class="text-muted">No preview available for this file type</p>
+                        <button class="btn btn-primary mt-2" id="download-preview-button">
+                            <i class="bi bi-download"></i> Download File
+                        </button>
+                    </div>
+                `;
+                
+                const downloadPreviewButton = document.getElementById('download-preview-button');
+                downloadPreviewButton.addEventListener('click', () => downloadFile(file.path));
+                
+                hidePreviewLoading();
+                
+                // Show download button, hide view text button
+                downloadFileButton.style.display = 'inline-block';
+                viewFileButton.style.display = 'none';
+            }
+        }
+        
+        // Reset all viewers
+        function resetViewers() {
+            filePreview.style.display = 'none';
+            stlViewer.style.display = 'none';
+            textViewer.style.display = 'none';
+            emptyPreview.style.display = 'none';
+            stlViewerButtons.style.display = 'none';
+            
+            if (renderer) {
+                renderer = null;
+            }
+        }
+        
+        // Show preview loading indicator
+        function showPreviewLoading() {
+            previewLoading.style.display = 'flex';
+        }
+        
+        // Hide preview loading indicator
+        function hidePreviewLoading() {
+            previewLoading.style.display = 'none';
+        }
+        
+        // Show preview error
+        function showPreviewError(message) {
+            emptyPreview.style.display = 'flex';
+            emptyPreview.innerHTML = `
+                <div class="text-center">
+                    <div class="text-danger mb-3">
+                        <i class="bi bi-exclamation-triangle-fill display-1"></i>
+                    </div>
+                    <h5 class="text-danger">${message}</h5>
+                </div>
+            `;
+            hidePreviewLoading();
+        }
+        
+        // Initialize Three.js scene for STL viewing
+        function initThreeJS() {
+            if (renderer) return;
+            
+            // Create scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xf0f0f0);
+            
+            // Create camera
+            camera = new THREE.PerspectiveCamera(75, stlViewer.clientWidth / stlViewer.clientHeight, 0.1, 1000);
+            camera.position.z = 5;
+            
+            // Create renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(stlViewer.clientWidth, stlViewer.clientHeight);
+            stlViewer.innerHTML = '';
+            stlViewer.appendChild(renderer.domElement);
+            
+            // Add orbit controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.25;
+            
+            // Add lights
+            const ambientLight = new THREE.AmbientLight(0x404040, 1);
+            scene.add(ambientLight);
+            
+            const directionalLight1 = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight1.position.set(1, 1, 1);
+            scene.add(directionalLight1);
+            
+            const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.5);
+            directionalLight2.position.set(-1, -1, -1);
+            scene.add(directionalLight2);
+            
+            // Handle window resize
+            window.addEventListener('resize', () => {
+                if (renderer) {
+                    camera.aspect = stlViewer.clientWidth / stlViewer.clientHeight;
+                    camera.updateProjectionMatrix();
+                    renderer.setSize(stlViewer.clientWidth, stlViewer.clientHeight);
+                }
+            });
+            
+            // Start animation loop
+            animate();
+            
+            // Show STL viewer buttons
+            stlViewerButtons.style.display = 'block';
+        }
+        
+        // Animation loop for Three.js
+        function animate() {
+            if (!renderer) return;
+            
+            requestAnimationFrame(animate);
+            
+            if (controls) controls.update();
+            
+            // Auto-rotate if enabled
+            if (rotating && mesh) {
+                mesh.rotation.y += 0.01;
+            }
+            
+            renderer.render(scene, camera);
+        }
+        
+        // Load STL file
+        function loadSTLFile(path) {
+            stlViewer.style.display = 'block';
+            
+            const loader = new THREE.STLLoader();
+            loader.load(
+                `/api/v1/files/download?path=${encodeURIComponent(path)}`,
+                function (geometry) {
+                    if (mesh) {
+                        scene.remove(mesh);
+                    }
+                    
+                    const material = new THREE.MeshPhongMaterial({
+                        color: 0x228B22,
+                        specular: 0x111111,
+                        shininess: 200,
+                        wireframe: wireframe
+                    });
+                    
+                    mesh = new THREE.Mesh(geometry, material);
+                    mesh.scale.set(0.1, 0.1, 0.1);
+                    
+                    // Center the model
+                    geometry.computeBoundingBox();
+                    const center = new THREE.Vector3();
+                    geometry.boundingBox.getCenter(center);
+                    mesh.position.set(-center.x * 0.1, -center.y * 0.1, -center.z * 0.1);
+                    
+                    scene.add(mesh);
+                    
+                    // Reset camera position
+                    resetCameraView();
+                    
+                    hidePreviewLoading();
+                },
+                function (xhr) {
+                    // Progress
+                    const percentComplete = (xhr.loaded / xhr.total) * 100;
+                    console.log('STL loading: ' + Math.round(percentComplete) + '%');
+                },
+                function (error) {
+                    console.error('Error loading STL:', error);
+                    showPreviewError('Failed to load STL file');
+                }
+            );
+        }
+        
+        // Reset camera view
+        function resetCameraView() {
+            if (!mesh) return;
+            
+            // Get bounding box
+            const bbox = new THREE.Box3().setFromObject(mesh);
+            const center = new THREE.Vector3();
+            bbox.getCenter(center);
+            
+            // Calculate size and distance
+            const size = new THREE.Vector3();
+            bbox.getSize(size);
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const distance = maxDim * 2; // Adjust this factor as needed
+            
+            // Set camera position
+            camera.position.set(center.x, center.y, center.z + distance);
+            camera.lookAt(center);
+            
+            // Update controls
+            controls.target.copy(center);
+            controls.update();
+        }
+        
+        // View text file content
+        async function viewTextFile(path) {
+            textViewer.style.display = 'block';
+            textContent.textContent = 'Loading...';
+            
+            try {
+                const response = await fetch(`/api/v1/files/view?path=${encodeURIComponent(path)}`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to load file content');
+                }
+                
+                const data = await response.json();
+                textContent.textContent = data.content;
+                hidePreviewLoading();
+                
+            } catch (error) {
+                console.error('Error loading text file:', error);
+                textContent.textContent = `Error: ${error.message}`;
+                hidePreviewLoading();
+            }
+        }
+        
+        // Open text viewer modal
+        function openTextViewerModal() {
+            if (!currentFile) return;
+            
+            // Show loading state in modal
+            modalTextContent.textContent = 'Loading...';
+            textViewerModalLabel.textContent = currentFile.name;
+            
+            // Open the modal
+            const modal = new bootstrap.Modal(textViewerModal);
+            modal.show();
+            
+            // Load text content
+            fetch(`/api/v1/files/view?path=${encodeURIComponent(currentFile.path)}`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Failed to load file content');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    modalTextContent.textContent = data.content;
+                })
+                .catch(error => {
+                    console.error('Error loading text file:', error);
+                    modalTextContent.textContent = `Error: ${error.message}`;
+                });
+        }
+        
+        // Download current file
+        function downloadFile(path) {
+            const downloadUrl = `/api/v1/files/download?path=${encodeURIComponent(path)}`;
+            
+            // Create a temporary link and trigger download
+            const link = document.createElement('a');
+            link.href = downloadUrl;
+            link.download = path.split('/').pop();
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+        
+        // Download current directory as zip
+        function downloadDirectoryAsZip(path) {
+            const downloadUrl = `/api/v1/files/download-zip?path=${encodeURIComponent(path)}`;
+            
+            // Create a temporary link and trigger download
+            const link = document.createElement('a');
+            link.href = downloadUrl;
+            link.download = path.split('/').pop() + '.zip';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+        
+        // Event listeners
+        refreshButton.addEventListener('click', () => {
+            loadDirectory(currentPath);
+            loadMediaFiles(currentPath);
+        });
+        
+        downloadFolderButton.addEventListener('click', () => {
+            downloadDirectoryAsZip(currentPath);
+        });
+        
+        downloadFileButton.addEventListener('click', () => {
+            if (currentFile) {
+                downloadFile(currentFile.path);
+            }
+        });
+        
+        viewFileButton.addEventListener('click', () => {
+            openTextViewerModal();
+        });
+        
+        downloadTextFileButton.addEventListener('click', () => {
+            if (currentFile) {
+                downloadFile(currentFile.path);
+            }
+        });
+        
+        // STL viewer controls
+        resetViewButton.addEventListener('click', resetCameraView);
+        
+        rotateButton.addEventListener('click', function() {
+            rotating = !rotating;
+            this.classList.toggle('active');
+            if (rotating) {
+                this.innerHTML = '<i class="bi bi-pause"></i>';
+            } else {
+                this.innerHTML = '<i class="bi bi-arrow-repeat"></i>';
+            }
+        });
+        
+        wireframeButton.addEventListener('click', function() {
+            if (!mesh) return;
+            
+            wireframe = !wireframe;
+            this.classList.toggle('active');
+            
+            mesh.material.wireframe = wireframe;
+        });
+        
+        // Root path link click
+        rootPathLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            loadDirectory(e.target.dataset.path);
+        });
+        
+        // Initialize
+        loadModelData();
+    });
+</script>
+{% endblock %}

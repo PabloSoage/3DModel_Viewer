@@ -1,0 +1,322 @@
+from typing import Any, List
+import os
+import zipfile
+import tempfile
+import shutil
+import subprocess
+import uuid
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, status, Response
+from fastapi.responses import FileResponse, StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+import mimetypes
+
+from app.core.auth import (
+    get_current_active_user,
+    get_current_admin_user
+)
+from app.db.init_db import get_db
+from app.core.config import settings
+from app.models.models import User, Model
+from app.api.api_v1.endpoints.explorer import check_path_permission
+
+router = APIRouter()
+
+
+@router.get("/download")
+async def download_file(
+    path: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> Any:
+    """
+    Download a file.
+    Only allows downloading files that the current user has access to.
+    Admin users can download any file.
+    """
+    # Normalize the path
+    path = os.path.normpath(path)
+    
+    # Check if the path exists
+    if not os.path.exists(path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found",
+        )
+    
+    # Check if the user has access to the path
+    if not check_path_permission(path, current_user, db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions to access this file",
+        )
+    
+    # Check if the path is a file
+    if os.path.isdir(path):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Path is a directory, not a file",
+        )
+    
+    return FileResponse(
+        path=path,
+        filename=os.path.basename(path),
+        media_type="application/octet-stream"
+    )
+
+
+@router.get("/download-zip")
+async def download_directory_as_zip(
+    path: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> Any:
+    """
+    Download a directory as a zip file.
+    Only allows downloading directories that the current user has access to.
+    Admin users can download any directory.
+    """
+    # Normalize the path
+    path = os.path.normpath(path)
+    
+    # Check if the path exists
+    if not os.path.exists(path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Directory not found",
+        )
+    
+    # Check if the user has access to the path
+    if not check_path_permission(path, current_user, db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions to access this directory",
+        )
+    
+    # Check if the path is a directory
+    if not os.path.isdir(path):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Path is not a directory",
+        )
+    
+    # Create a temporary file for the zip
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
+    temp_file.close()
+    
+    try:
+        # Create the zip file
+        with zipfile.ZipFile(temp_file.name, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, _, files in os.walk(path):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, path)
+                    zipf.write(file_path, arcname)
+        
+        # Return the zip file
+        return FileResponse(
+            path=temp_file.name,
+            filename=f"{os.path.basename(path)}.zip",
+            media_type="application/zip"
+        )
+    except Exception as e:
+        # Clean up the temporary file if there's an error
+        os.unlink(temp_file.name)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating zip file: {str(e)}",
+        )
+
+
+@router.get("/view")
+async def view_text_file(
+    path: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> Any:
+    """
+    View a text file in the browser.
+    Only allows viewing files that the current user has access to.
+    Admin users can view any file.
+    """
+    # Normalize the path
+    path = os.path.normpath(path)
+    
+    # Check if the path exists
+    if not os.path.exists(path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found",
+        )
+    
+    # Check if the user has access to the path
+    if not check_path_permission(path, current_user, db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions to access this file",
+        )
+    
+    # Check if the path is a file
+    if os.path.isdir(path):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Path is a directory, not a file",
+        )
+    
+    # Check if the file is a text file
+    _, ext = os.path.splitext(path)
+    if ext.lower() not in settings.TEXT_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File is not a text file",
+        )
+    
+    # Read the file content
+    try:
+        with open(path, 'r', encoding='utf-8') as file:
+            content = file.read()
+        return {"content": content, "filename": os.path.basename(path)}
+    except UnicodeDecodeError:
+        # Try with a different encoding if utf-8 fails
+        try:
+            with open(path, 'r', encoding='latin-1') as file:
+                content = file.read()
+            return {"content": content, "filename": os.path.basename(path)}
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error reading file: {str(e)}",
+            )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error reading file: {str(e)}",
+        )
+
+
+@router.get("/preview-stl")
+async def generate_stl_preview(
+    path: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> Any:
+    """
+    Generate a preview image for an STL file.
+    Only allows previewing files that the current user has access to.
+    Admin users can preview any file.
+    """
+    # Normalize the path
+    path = os.path.normpath(path)
+    
+    # Check if the path exists
+    if not os.path.exists(path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found",
+        )
+    
+    # Check if the user has access to the path
+    if not check_path_permission(path, current_user, db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions to access this file",
+        )
+    
+    # Check if the path is a file
+    if os.path.isdir(path):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Path is a directory, not a file",
+        )
+    
+    # Check if the file is an STL file
+    _, ext = os.path.splitext(path)
+    if ext.lower() != '.stl':
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File is not an STL file",
+        )
+    
+    # Create a unique filename for the preview
+    filename = str(uuid.uuid4()) + ".png"
+    preview_path = os.path.join(settings.STL_PREVIEW_DIR, filename)
+    
+    # Try to generate the preview using various tools
+    # This requires external tools to be installed
+    try:
+        # First attempt: Try using Python libraries (requires numpy-stl and matplotlib)
+        try:
+            import numpy as np
+            from stl import mesh
+            import matplotlib.pyplot as plt
+            from mpl_toolkits import mplot3d
+            
+            # Load the STL file
+            stl_mesh = mesh.Mesh.from_file(path)
+            
+            # Create a new plot
+            figure = plt.figure(figsize=(10, 10))
+            axes = mplot3d.Axes3D(figure)
+            
+            # Add the STL mesh to the plot
+            axes.add_collection3d(mplot3d.art3d.Poly3DCollection(stl_mesh.vectors))
+            
+            # Auto scale to the mesh size
+            scale = stl_mesh.points.flatten()
+            axes.auto_scale_xyz(scale, scale, scale)
+            
+            # Set background color
+            axes.set_facecolor('white')
+            
+            # Remove axes
+            plt.axis('off')
+            
+            # Save the preview
+            plt.savefig(preview_path, bbox_inches='tight', dpi=100)
+            plt.close(figure)
+            
+            return FileResponse(preview_path, media_type="image/png")
+        
+        except ImportError:
+            # If the Python libraries are not available, try using external tools
+            pass
+        
+        # Second attempt: Try using OpenSCAD (if installed)
+        try:
+            # Create a temporary SCAD file
+            with tempfile.NamedTemporaryFile(suffix='.scad', delete=False) as scad_file:
+                scad_content = f'import("{path}");\n'
+                scad_file.write(scad_content.encode('utf-8'))
+                scad_path = scad_file.name
+            
+            # Use OpenSCAD to generate the preview
+            subprocess.run(
+                ['openscad', '-o', preview_path, '--imgsize=800,800', scad_path],
+                check=True
+            )
+            
+            # Clean up temporary file
+            os.unlink(scad_path)
+            
+            return FileResponse(preview_path, media_type="image/png")
+        
+        except (subprocess.SubprocessError, FileNotFoundError):
+            # If OpenSCAD is not available, try another method
+            pass
+        
+        # If all attempts fail, return an error
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate STL preview. Required tools are not installed.",
+        )
+    
+    except Exception as e:
+        # If the preview file was created but there was an error, clean it up
+        if os.path.exists(preview_path):
+            os.unlink(preview_path)
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error generating STL preview: {str(e)}",
+        )

@@ -1,0 +1,79 @@
+/* Custom styles for 3D Model Viewer */
+
+/* Footer Styles */
+html, body {
+    height: 100%;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+}
+
+.footer {
+    margin-top: auto;
+}
+
+/* Card Hover Effect */
+.card {
+    transition: box-shadow 0.3s ease-in-out;
+}
+
+.card:hover {
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+}
+
+/* File Explorer Styles */
+.file-explorer {
+    max-height: 600px;
+    overflow-y: auto;
+}
+
+/* Media Grid Styles */
+.media-grid {
+    margin-top: 20px;
+}
+
+.media-item {
+    cursor: pointer;
+    transition: transform 0.2s;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.media-item:hover {
+    transform: scale(1.05);
+}
+
+/* Text content viewer */
+#content-viewer {
+    font-family: monospace;
+    white-space: pre-wrap;
+    font-size: 0.875rem;
+}
+
+/* STL preview */
+.stl-preview {
+    background-color: #f8f9fa;
+    padding: 10px;
+}
+
+/* Utility classes */
+.cursor-pointer {
+    cursor: pointer;
+}
+
+/* Video placeholder */
+.media-item .play-icon {
+    opacity: 0.8;
+    transition: opacity 0.2s;
+}
+
+.media-item:hover .play-icon {
+    opacity: 1;
+}
+
+/* Model card on home page */
+.model-card-img {
+    background-color: #f8f9fa;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}

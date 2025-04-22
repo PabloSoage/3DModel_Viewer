@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block title %}Login - 3D Model Viewer{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-6 col-lg-4">
+        <div class="card shadow">
+            <div class="card-header bg-dark text-white text-center">
+                <h4 class="my-0">Login</h4>
+            </div>
+            <div class="card-body">
+                <form id="login-form">
+                    <div class="mb-3">
+                        <label for="username" class="form-label">Username</label>
+                        <input type="text" class="form-control" id="username" name="username" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="password" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="password" name="password" required>
+                    </div>
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary" id="login-button">
+                            <span class="spinner-border spinner-border-sm d-none" id="login-spinner" role="status" aria-hidden="true"></span>
+                            Login
+                        </button>
+                    </div>
+                </form>
+                <div class="alert alert-danger mt-3 d-none" id="login-error"></div>
+                <div class="alert alert-info mt-3" role="alert">
+                    <small>Default admin credentials: username: <strong>admin</strong>, password: <strong>admin</strong></small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const loginForm = document.getElementById('login-form');
+        const loginButton = document.getElementById('login-button');
+        const loginSpinner = document.getElementById('login-spinner');
+        const loginError = document.getElementById('login-error');
+        
+        // Check if user already has a token
+        const token = localStorage.getItem('token');
+        if (token) {
+            window.location.href = '/models';
+        }
+        
+        loginForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            // Show spinner and disable button
+            loginButton.disabled = true;
+            loginSpinner.classList.remove('d-none');
+            loginError.classList.add('d-none');
+            
+            const formData = new FormData();
+            formData.append('username', document.getElementById('username').value);
+            formData.append('password', document.getElementById('password').value);
+            
+            try {
+                const response = await fetch('/api/v1/auth/login', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Invalid credentials');
+                }
+                
+                const data = await response.json();
+                
+                // Store the token in localStorage
+                localStorage.setItem('token', data.access_token);
+                
+                // Redirect to the models page
+                window.location.href = '/models';
+                
+            } catch (error) {
+                loginError.textContent = error.message;
+                loginError.classList.remove('d-none');
+            } finally {
+                // Hide spinner and enable button
+                loginButton.disabled = false;
+                loginSpinner.classList.add('d-none');
+            }
+        });
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,494 @@
+{% extends "base.html" %}
+
+{% block title %}Admin: Models Management - 3D Model Viewer{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-6">
+        <h1 class="mb-0">3D Models Management</h1>
+        <p class="text-muted">Admin interface</p>
+    </div>
+    <div class="col-md-6 text-end">
+        <div class="btn-group">
+            <button class="btn btn-outline-primary" id="refresh-button">
+                <i class="bi bi-arrow-clockwise"></i> Refresh
+            </button>
+            <button class="btn btn-outline-secondary" id="toggle-view-button" data-view="grid">
+                <i class="bi bi-list"></i> List View
+            </button>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4" id="models-grid-container">
+    <!-- Models will be loaded dynamically here -->
+    <div class="col-12 text-center py-5">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <p class="mt-2 text-muted">Loading models...</p>
+    </div>
+</div>
+
+<!-- Model Management Modal -->
+<div class="modal fade" id="manageModelModal" tabindex="-1" aria-labelledby="manageModelModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="manageModelModalLabel">Manage Model Access</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <h6 class="model-name mb-3"></h6>
+                <div id="model-permissions-container">
+                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    Loading users...
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" id="save-permissions-button">Save Changes</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Template for grid card view -->
+<template id="model-card-template">
+    <div class="col-md-4 col-sm-6 mb-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title model-name"></h5>
+                <p class="card-text model-description text-muted"></p>
+                <div class="model-preview-container text-center mb-3">
+                    <!-- Preview image will be inserted here if available -->
+                </div>
+            </div>
+            <div class="card-footer bg-transparent">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <a href="#" class="btn btn-primary btn-sm explore-model-btn">
+                            <i class="bi bi-folder2-open"></i> Explore
+                        </a>
+                    </div>
+                    <div>
+                        <button class="btn btn-outline-secondary btn-sm manage-model-btn">
+                            <i class="bi bi-people"></i> Manage Access
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+
+<!-- Template for list view row -->
+<template id="model-row-template">
+    <div class="col-12 mb-2">
+        <div class="card">
+            <div class="card-body py-2">
+                <div class="row align-items-center">
+                    <div class="col-md-6 col-sm-8">
+                        <h5 class="mb-0 model-name"></h5>
+                        <small class="text-muted model-description"></small>
+                    </div>
+                    <div class="col-md-6 col-sm-4 text-sm-end mt-2 mt-sm-0">
+                        <a href="#" class="btn btn-primary btn-sm me-1 explore-model-btn">
+                            <i class="bi bi-folder2-open"></i> Explore
+                        </a>
+                        <button class="btn btn-outline-secondary btn-sm manage-model-btn">
+                            <i class="bi bi-people"></i> Manage Access
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+
+<!-- Template for no models found -->
+<template id="no-models-template">
+    <div class="col-12 text-center py-5">
+        <div class="display-1 text-muted mb-3">
+            <i class="bi bi-emoji-neutral"></i>
+        </div>
+        <h4 class="text-muted">No models available</h4>
+        <p class="text-muted">
+            There are no models in the system. Add models to the models directory to get started.
+        </p>
+    </div>
+</template>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Authentication check
+        const token = localStorage.getItem('token');
+        if (!token) {
+            window.location.href = '/login';
+            return;
+        }
+
+        const modelsContainer = document.getElementById('models-grid-container');
+        const toggleViewBtn = document.getElementById('toggle-view-button');
+        const refreshButton = document.getElementById('refresh-button');
+        const modelCardTemplate = document.getElementById('model-card-template');
+        const modelRowTemplate = document.getElementById('model-row-template');
+        const noModelsTemplate = document.getElementById('no-models-template');
+        
+        let currentView = 'grid'; // Default view is grid
+        let allModels = [];
+        let allUsers = [];
+        
+        // Load models
+        async function loadModels() {
+            try {
+                const response = await fetch('/api/v1/models', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    if (response.status === 401 || response.status === 403) {
+                        localStorage.removeItem('token');
+                        window.location.href = '/login';
+                        return;
+                    }
+                    throw new Error('Failed to load models');
+                }
+                
+                allModels = await response.json();
+                renderModels();
+            } catch (error) {
+                console.error('Error loading models:', error);
+                showToast('Failed to load models: ' + error.message, 'danger');
+                modelsContainer.innerHTML = `
+                    <div class="col-12 text-center py-5">
+                        <div class="alert alert-danger">
+                            <i class="bi bi-exclamation-triangle-fill"></i> Failed to load models: ${error.message}
+                        </div>
+                        <button class="btn btn-primary" onclick="location.reload()">Try Again</button>
+                    </div>
+                `;
+            }
+        }
+
+        // Render models based on current view
+        function renderModels() {
+            modelsContainer.innerHTML = '';
+            
+            if (!allModels.length) {
+                modelsContainer.appendChild(noModelsTemplate.content.cloneNode(true));
+                return;
+            }
+            
+            allModels.forEach(model => {
+                if (currentView === 'grid') {
+                    const modelCard = modelCardTemplate.content.cloneNode(true);
+                    modelCard.querySelector('.model-name').textContent = model.name;
+                    modelCard.querySelector('.model-description').textContent = model.description || 'No description available';
+                    
+                    const exploreBtn = modelCard.querySelector('.explore-model-btn');
+                    exploreBtn.href = `/explorer/${model.id}`;
+                    
+                    const manageBtn = modelCard.querySelector('.manage-model-btn');
+                    manageBtn.dataset.modelId = model.id;
+                    manageBtn.dataset.modelName = model.name;
+                    manageBtn.dataset.modelPath = model.path;
+                    
+                    // Add model preview placeholder
+                    const previewContainer = modelCard.querySelector('.model-preview-container');
+                    previewContainer.innerHTML = `
+                        <div class="model-preview">
+                            <i class="bi bi-box display-1 text-muted"></i>
+                        </div>
+                    `;
+                    
+                    modelsContainer.appendChild(modelCard);
+                } else {
+                    const modelRow = modelRowTemplate.content.cloneNode(true);
+                    modelRow.querySelector('.model-name').textContent = model.name;
+                    modelRow.querySelector('.model-description').textContent = model.description || 'No description available';
+                    
+                    const exploreBtn = modelRow.querySelector('.explore-model-btn');
+                    exploreBtn.href = `/explorer/${model.id}`;
+                    
+                    const manageBtn = modelRow.querySelector('.manage-model-btn');
+                    manageBtn.dataset.modelId = model.id;
+                    manageBtn.dataset.modelName = model.name;
+                    manageBtn.dataset.modelPath = model.path;
+                    
+                    modelsContainer.appendChild(modelRow);
+                }
+            });
+            
+            // Setup manage buttons event listeners
+            document.querySelectorAll('.manage-model-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    openManageModelModal(this.dataset.modelId, this.dataset.modelName);
+                });
+            });
+        }
+
+        // Toggle view between grid and list
+        toggleViewBtn.addEventListener('click', function() {
+            if (currentView === 'grid') {
+                currentView = 'list';
+                this.innerHTML = '<i class="bi bi-grid"></i> Grid View';
+                this.dataset.view = 'list';
+            } else {
+                currentView = 'grid';
+                this.innerHTML = '<i class="bi bi-list"></i> List View';
+                this.dataset.view = 'grid';
+            }
+            renderModels();
+        });
+
+        // Refresh button
+        refreshButton.addEventListener('click', function() {
+            loadModels();
+        });
+
+        // Manage Model Modal functionality
+        const manageModelModal = document.getElementById('manageModelModal');
+        const modelPermissionsContainer = document.getElementById('model-permissions-container');
+        const savePermissionsButton = document.getElementById('save-permissions-button');
+        let currentModelId = null;
+        let originalUserPermissions = [];
+
+        // Load all users for the admin
+        async function loadUsers() {
+            try {
+                const response = await fetch('/api/v1/users', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to load users');
+                }
+                
+                allUsers = await response.json();
+            } catch (error) {
+                console.error('Error loading users:', error);
+                showToast('Failed to load users: ' + error.message, 'danger');
+            }
+        }
+
+        // Open manage model modal
+        async function openManageModelModal(modelId, modelName) {
+            currentModelId = modelId;
+            document.querySelector('#manageModelModal .model-name').textContent = modelName;
+            modelPermissionsContainer.innerHTML = `
+                <div class="text-center">
+                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    Loading users...
+                </div>
+            `;
+            
+            // Initialize Bootstrap modal
+            const modal = new bootstrap.Modal(manageModelModal);
+            modal.show();
+            
+            // Load users if not already loaded
+            if (!allUsers.length) {
+                await loadUsers();
+            }
+            
+            // Load model permissions
+            try {
+                const response = await fetch(`/api/v1/models/${modelId}/permissions`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to load model permissions');
+                }
+                
+                const modelUserIds = await response.json();
+                originalUserPermissions = [...modelUserIds];
+                
+                // Display users with checkboxes
+                modelPermissionsContainer.innerHTML = '';
+                
+                if (allUsers.length === 0) {
+                    modelPermissionsContainer.innerHTML = '<div class="alert alert-info">No users found.</div>';
+                    return;
+                }
+                
+                const userListContainer = document.createElement('div');
+                userListContainer.className = 'list-group';
+                
+                allUsers.forEach(user => {
+                    if (user.username === 'admin') return; // Skip admin user as they always have access
+                    
+                    const hasAccess = modelUserIds.includes(user.id);
+                    
+                    const userItem = document.createElement('label');
+                    userItem.className = 'list-group-item';
+                    userItem.innerHTML = `
+                        <input class="form-check-input me-2 user-checkbox" 
+                               type="checkbox" 
+                               value="${user.id}" 
+                               ${hasAccess ? 'checked' : ''}>
+                        ${user.username}
+                        ${user.is_admin ? '<span class="badge bg-primary ms-2">Admin</span>' : ''}
+                    `;
+                    
+                    userListContainer.appendChild(userItem);
+                });
+                
+                modelPermissionsContainer.appendChild(userListContainer);
+                
+            } catch (error) {
+                console.error('Error loading model permissions:', error);
+                modelPermissionsContainer.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-triangle-fill"></i> 
+                        Failed to load permissions: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Save model permissions
+        savePermissionsButton.addEventListener('click', async function() {
+            const selectedUserIds = Array.from(
+                document.querySelectorAll('#model-permissions-container .user-checkbox:checked')
+            ).map(checkbox => parseInt(checkbox.value));
+            
+            const toAdd = selectedUserIds.filter(id => !originalUserPermissions.includes(id));
+            const toRemove = originalUserPermissions.filter(id => !selectedUserIds.includes(id));
+            
+            // Show loading state
+            savePermissionsButton.disabled = true;
+            savePermissionsButton.innerHTML = `
+                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                Saving...
+            `;
+            
+            try {
+                // Add permissions
+                for (const userId of toAdd) {
+                    await fetch('/api/v1/models/permissions', {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({
+                            model_id: currentModelId,
+                            user_id: userId
+                        })
+                    });
+                }
+                
+                // Remove permissions
+                for (const userId of toRemove) {
+                    await fetch('/api/v1/models/permissions', {
+                        method: 'DELETE',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({
+                            model_id: currentModelId,
+                            user_id: userId
+                        })
+                    });
+                }
+                
+                // Close modal and show success message
+                bootstrap.Modal.getInstance(manageModelModal).hide();
+                showToast('Permissions updated successfully', 'success');
+                
+            } catch (error) {
+                console.error('Error updating permissions:', error);
+                showToast('Failed to update permissions: ' + error.message, 'danger');
+            } finally {
+                // Reset button state
+                savePermissionsButton.disabled = false;
+                savePermissionsButton.innerHTML = 'Save Changes';
+            }
+        });
+        
+        // Load users for admin
+        loadUsers();
+        
+        // Initial load
+        loadModels();
+        
+        // Check user is admin
+        async function checkAdminStatus() {
+            try {
+                const response = await fetch('/api/v1/auth/me', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to verify admin status');
+                }
+                
+                const userData = await response.json();
+                
+                if (!userData.is_admin) {
+                    // Redirect non-admin users
+                    window.location.href = '/models';
+                }
+                
+            } catch (error) {
+                console.error('Error checking admin status:', error);
+                // Error handling, redirect to login
+                window.location.href = '/login';
+            }
+        }
+        
+        // Verify admin status on page load
+        checkAdminStatus();
+    });
+
+    // Toast notification function
+    function showToast(message, type = 'info') {
+        const toastContainer = document.getElementById('toast-container');
+        if (!toastContainer) {
+            const container = document.createElement('div');
+            container.id = 'toast-container';
+            container.className = 'toast-container position-fixed bottom-0 end-0 p-3';
+            document.body.appendChild(container);
+        }
+        
+        const toastId = 'toast-' + Date.now();
+        const html = `
+            <div id="${toastId}" class="toast align-items-center text-white bg-${type} border-0" role="alert" aria-live="assertive" aria-atomic="true">
+                <div class="d-flex">
+                    <div class="toast-body">
+                        ${message}
+                    </div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                </div>
+            </div>
+        `;
+        
+        document.getElementById('toast-container').insertAdjacentHTML('beforeend', html);
+        const toastElement = document.getElementById(toastId);
+        const toast = new bootstrap.Toast(toastElement);
+        toast.show();
+        
+        // Auto-remove toast after it's hidden
+        toastElement.addEventListener('hidden.bs.toast', function() {
+            this.remove();
+        });
+    }
+</script>
+{% endblock %}

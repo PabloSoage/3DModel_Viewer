@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}3D Model Viewer{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.3/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/styles.css') }}">
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/models">3D Model Viewer</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto" id="main-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/models"><i class="bi bi-collection"></i> Models</a>
+                    </li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-person-circle"></i> 
+                            <span id="username-display">Account</span>
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navbarDropdown">
+                            <li><a class="dropdown-item" href="#" id="logout-button"><i class="bi bi-box-arrow-right"></i> Logout</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4 mb-5">
+        <div id="toast-container" class="position-fixed top-0 end-0 p-3" style="z-index: 1100"></div>
+        {% block content %}{% endblock %}
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const token = localStorage.getItem('token');
+            const logoutButton = document.getElementById('logout-button');
+            const usernameDisplay = document.getElementById('username-display');
+            const mainNav = document.getElementById('main-nav');
+            
+            // If no token, redirect to login
+            if (!token) {
+                window.location.href = '/login';
+                return;
+            }
+            
+            // Fetch current user info
+            async function fetchUserInfo() {
+                try {
+                    const response = await fetch('/api/v1/auth/me', {
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    });
+                    
+                    if (!response.ok) {
+                        if (response.status === 401) {
+                            localStorage.removeItem('token');
+                            window.location.href = '/login';
+                            return;
+                        }
+                        throw new Error('Failed to fetch user info');
+                    }
+                    
+                    const userData = await response.json();
+                    
+                    // Update username display
+                    if (userData.username) {
+                        usernameDisplay.textContent = userData.username;
+                    }
+                    
+                    // Add admin links if user is admin
+                    if (userData.is_admin) {
+                        // Add Users link for admins
+                        const usersLink = document.createElement('li');
+                        usersLink.className = 'nav-item';
+                        usersLink.innerHTML = '<a class="nav-link" href="/admin/users"><i class="bi bi-people"></i> Users</a>';
+                        mainNav.appendChild(usersLink);
+                        
+                        // Add Admin Models link if not already on that page
+                        if (!window.location.pathname.includes('/admin/models')) {
+                            const adminModelsLink = document.createElement('li');
+                            adminModelsLink.className = 'nav-item';
+                            adminModelsLink.innerHTML = '<a class="nav-link" href="/admin/models"><i class="bi bi-gear"></i> Admin Models</a>';
+                            mainNav.appendChild(adminModelsLink);
+                        }
+                    }
+                    
+                } catch (error) {
+                    console.error('Error fetching user info:', error);
+                }
+            }
+            
+            // Fetch user info on page load
+            fetchUserInfo();
+            
+            // Logout button
+            if (logoutButton) {
+                logoutButton.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    
+                    // Clear token from localStorage
+                    localStorage.removeItem('token');
+                    
+                    // Redirect to login page
+                    window.location.href = '/login';
+                });
+            }
+        });
+
+        function showToast(message, type = 'success') {
+            const toastContainer = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast align-items-center text-white bg-${type} border-0`;
+            toast.setAttribute('role', 'alert');
+            toast.setAttribute('aria-live', 'assertive');
+            toast.setAttribute('aria-atomic', 'true');
+            toast.innerHTML = `
+                <div class="d-flex">
+                    <div class="toast-body">
+                        ${message}
+                    </div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                </div>
+            `;
+            toastContainer.appendChild(toast);
+            const bsToast = new bootstrap.Toast(toast);
+            bsToast.show();
+            toast.addEventListener('hidden.bs.toast', function() {
+                toast.remove();
+            });
+        }
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
