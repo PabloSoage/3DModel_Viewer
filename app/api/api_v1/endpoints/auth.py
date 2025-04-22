@@ -46,6 +46,7 @@ async def login_access_token(
     }
 
 
+@router.get("/test-token", response_model=dict)
 @router.post("/test-token", response_model=dict)
 async def test_token(current_user: User = Depends(get_current_active_user)) -> Any:
     """

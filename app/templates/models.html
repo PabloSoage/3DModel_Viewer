@@ -90,13 +90,11 @@
 
 {% block extra_js %}
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        // Authentication check
-        const token = localStorage.getItem('token');
-        if (!token) {
-            window.location.href = '/login';
-            return;
-        }
+    document.addEventListener('DOMContentLoaded', async function() {
+        // Usar Auth.protectRoute para verificar la autenticación
+        // Esto redirigirá automáticamente a login si no hay un token válido
+        const authenticated = await Auth.protectRoute();
+        if (!authenticated) return;
 
         const modelsContainer = document.getElementById('models-grid-container');
         const toggleViewBtn = document.getElementById('toggle-view-button');
@@ -107,21 +105,13 @@
         
         let currentView = 'grid'; // Default view is grid
         
-        // Load models
+        // Cargar modelos usando Auth.fetch para manejar la autenticación automáticamente
         async function loadModels() {
             try {
-                const response = await fetch('/api/v1/models', {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
+                // Usar Auth.fetch en lugar de fetch normal para incluir el token automáticamente
+                const response = await Auth.fetch('/api/v1/models');
                 
-                if (!response.ok) {
-                    if (response.status === 401) {
-                        localStorage.removeItem('token');
-                        window.location.href = '/login';
-                        return;
-                    }
+                if (!response || !response.ok) {
                     throw new Error('Failed to load models');
                 }
                 
@@ -200,23 +190,13 @@
             loadModels();
         });
 
-        // Check user role and redirect if admin
+        // Check user role and add admin link if needed
         async function checkUserRole() {
             try {
-                const response = await fetch('/api/v1/auth/me', {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-                
-                if (!response.ok) {
-                    throw new Error('Failed to fetch user information');
-                }
-                
-                const userData = await response.json();
+                const isAdmin = await Auth.isAdmin();
                 
                 // If user is admin, show admin link
-                if (userData.is_admin) {
+                if (isAdmin) {
                     const adminLink = document.createElement('div');
                     adminLink.className = 'mb-3 text-end';
                     adminLink.innerHTML = `
@@ -228,10 +208,8 @@
                     // Insert before the models container
                     modelsContainer.parentNode.insertBefore(adminLink, modelsContainer);
                 }
-                
             } catch (error) {
                 console.error('Error fetching user information:', error);
-                // Error handling - stay on this page but don't show admin links
             }
         }
         
@@ -239,38 +217,5 @@
         loadModels();
         checkUserRole();
     });
-
-    // Toast notification function
-    function showToast(message, type = 'info') {
-        const toastContainer = document.getElementById('toast-container');
-        if (!toastContainer) {
-            const container = document.createElement('div');
-            container.id = 'toast-container';
-            container.className = 'toast-container position-fixed bottom-0 end-0 p-3';
-            document.body.appendChild(container);
-        }
-        
-        const toastId = 'toast-' + Date.now();
-        const html = `
-            <div id="${toastId}" class="toast align-items-center text-white bg-${type} border-0" role="alert" aria-live="assertive" aria-atomic="true">
-                <div class="d-flex">
-                    <div class="toast-body">
-                        ${message}
-                    </div>
-                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
-                </div>
-            </div>
-        `;
-        
-        document.getElementById('toast-container').insertAdjacentHTML('beforeend', html);
-        const toastElement = document.getElementById(toastId);
-        const toast = new bootstrap.Toast(toastElement);
-        toast.show();
-        
-        // Auto-remove toast after it's hidden
-        toastElement.addEventListener('hidden.bs.toast', function() {
-            this.remove();
-        });
-    }
 </script>
 {% endblock %}

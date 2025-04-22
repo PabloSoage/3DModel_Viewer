@@ -2,7 +2,8 @@ import os
 import secrets
 from typing import Optional, Dict, Any, List
 
-from pydantic import BaseSettings, validator
+from pydantic_settings import BaseSettings
+from pydantic import field_validator
 
 
 class Settings(BaseSettings):
@@ -10,12 +11,13 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     
     # Secret key for JWT token generation
-    SECRET_KEY: str = "CHANGE_THIS_SECRET_KEY_TO_SOMETHING_SECURE_IN_PRODUCTION"
+    # Generamos una clave secreta criptográficamente segura
+    SECRET_KEY: str = secrets.token_hex(32)
     # 60 minutes * 24 hours * 7 days = 7 days
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7
     
     # Base directory for 3D models
-    MODELS_BASE_DIR: str = os.path.abspath(r"D:\Downloads+\3DModel_Viewer\models")
+    MODELS_BASE_DIR: str = os.path.abspath(r"D:/Downloads+/3DModel_Viewer/models")
     
     # Supported media file extensions for previews
     MEDIA_EXTENSIONS: List[str] = [
@@ -38,9 +40,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str = f"sqlite:///./app/db/app.db"
     
     # STL preview settings
-    STL_PREVIEW_DIR: str = os.path.abspath(r"D:\Downloads+\3DModel_Viewer\app\static\previews")
+    STL_PREVIEW_DIR: str = os.path.abspath(r"D:/Downloads+/3DModel_Viewer/app/static/previews")
     
-    @validator("STL_PREVIEW_DIR", pre=True)
+    @field_validator("STL_PREVIEW_DIR", mode="before")
     def create_stl_preview_dir(cls, v):
         os.makedirs(v, exist_ok=True)
         return v

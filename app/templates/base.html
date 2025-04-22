@@ -43,79 +43,61 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Incluir nuestro archivo de autenticación compartido -->
+    <script src="{{ url_for('static', path='/js/auth.js') }}"></script>
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const token = localStorage.getItem('token');
+        document.addEventListener('DOMContentLoaded', async function() {
             const logoutButton = document.getElementById('logout-button');
             const usernameDisplay = document.getElementById('username-display');
             const mainNav = document.getElementById('main-nav');
             
-            // If no token, redirect to login
-            if (!token) {
-                window.location.href = '/login';
+            // Si estamos en la página de login, no intentar proteger la ruta
+            // Esto es para evitar ciclos de redirección
+            if (window.location.pathname === '/login') {
+                console.log("En página de login - no se verifica autenticación");
                 return;
             }
             
-            // Fetch current user info
-            async function fetchUserInfo() {
-                try {
-                    const response = await fetch('/api/v1/auth/me', {
-                        headers: {
-                            'Authorization': `Bearer ${token}`
-                        }
-                    });
+            // Para otras páginas, verificar autenticación
+            console.log("Verificando autenticación para: " + window.location.pathname);
+            const authenticated = await Auth.protectRoute();
+            if (!authenticated) {
+                console.log("No autenticado - redirigiendo a login");
+                return;
+            }
+            
+            console.log("Usuario autenticado, cargando datos de usuario");
+            
+            // Si estamos autenticados, cargar la información del usuario
+            const userData = await Auth.getCurrentUser();
+            
+            if (userData) {
+                // Actualizar nombre de usuario en el menú
+                usernameDisplay.textContent = userData.username;
+                
+                // Agregar enlaces de administrador si el usuario es admin
+                if (userData.is_admin) {
+                    // Agregar enlace a Usuarios para admins
+                    const usersLink = document.createElement('li');
+                    usersLink.className = 'nav-item';
+                    usersLink.innerHTML = '<a class="nav-link" href="/admin/users"><i class="bi bi-people"></i> Users</a>';
+                    mainNav.appendChild(usersLink);
                     
-                    if (!response.ok) {
-                        if (response.status === 401) {
-                            localStorage.removeItem('token');
-                            window.location.href = '/login';
-                            return;
-                        }
-                        throw new Error('Failed to fetch user info');
+                    // Agregar enlace a Admin Models si no estamos ya en esa página
+                    if (!window.location.pathname.includes('/admin/models')) {
+                        const adminModelsLink = document.createElement('li');
+                        adminModelsLink.className = 'nav-item';
+                        adminModelsLink.innerHTML = '<a class="nav-link" href="/admin/models"><i class="bi bi-gear"></i> Admin Models</a>';
+                        mainNav.appendChild(adminModelsLink);
                     }
-                    
-                    const userData = await response.json();
-                    
-                    // Update username display
-                    if (userData.username) {
-                        usernameDisplay.textContent = userData.username;
-                    }
-                    
-                    // Add admin links if user is admin
-                    if (userData.is_admin) {
-                        // Add Users link for admins
-                        const usersLink = document.createElement('li');
-                        usersLink.className = 'nav-item';
-                        usersLink.innerHTML = '<a class="nav-link" href="/admin/users"><i class="bi bi-people"></i> Users</a>';
-                        mainNav.appendChild(usersLink);
-                        
-                        // Add Admin Models link if not already on that page
-                        if (!window.location.pathname.includes('/admin/models')) {
-                            const adminModelsLink = document.createElement('li');
-                            adminModelsLink.className = 'nav-item';
-                            adminModelsLink.innerHTML = '<a class="nav-link" href="/admin/models"><i class="bi bi-gear"></i> Admin Models</a>';
-                            mainNav.appendChild(adminModelsLink);
-                        }
-                    }
-                    
-                } catch (error) {
-                    console.error('Error fetching user info:', error);
                 }
             }
             
-            // Fetch user info on page load
-            fetchUserInfo();
-            
-            // Logout button
+            // Configurar botón de logout
             if (logoutButton) {
                 logoutButton.addEventListener('click', function(e) {
                     e.preventDefault();
-                    
-                    // Clear token from localStorage
-                    localStorage.removeItem('token');
-                    
-                    // Redirect to login page
-                    window.location.href = '/login';
+                    Auth.logout();
                 });
             }
         });

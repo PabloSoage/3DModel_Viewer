@@ -4,10 +4,8 @@ from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.core.auth import (
-    get_current_admin_user,
-    get_password_hash,
-)
+from app.core.auth import get_current_admin_user
+from app.core.utils import get_password_hash
 from app.db.init_db import get_db
 from app.models.models import User
 from app.schemas.user import User as UserSchema, UserCreate, UserUpdate

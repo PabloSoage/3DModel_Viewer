@@ -38,53 +38,48 @@
 
 {% block extra_js %}
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
+    document.addEventListener('DOMContentLoaded', async function() {
         const loginForm = document.getElementById('login-form');
         const loginButton = document.getElementById('login-button');
         const loginSpinner = document.getElementById('login-spinner');
         const loginError = document.getElementById('login-error');
         
-        // Check if user already has a token
-        const token = localStorage.getItem('token');
-        if (token) {
-            window.location.href = '/models';
-        }
+        console.log("Login page loaded");
+        
+        // Limpiar cualquier mensaje de error anterior
+        loginError.classList.add('d-none');
+        
+        // Eliminar cualquier token inválido que pudiera existir
+        localStorage.removeItem('token');
+        console.log("Removed any existing token on login page load");
         
         loginForm.addEventListener('submit', async function(e) {
             e.preventDefault();
+            console.log("Login form submitted");
             
-            // Show spinner and disable button
+            // Mostrar spinner y deshabilitar botón
             loginButton.disabled = true;
             loginSpinner.classList.remove('d-none');
             loginError.classList.add('d-none');
             
-            const formData = new FormData();
-            formData.append('username', document.getElementById('username').value);
-            formData.append('password', document.getElementById('password').value);
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            console.log(`Attempting to login with username: ${username}`);
             
             try {
-                const response = await fetch('/api/v1/auth/login', {
-                    method: 'POST',
-                    body: formData
-                });
+                // Usar el método login de Auth
+                await Auth.login(username, password);
+                console.log("Login successful, redirecting to models page");
                 
-                if (!response.ok) {
-                    throw new Error('Invalid credentials');
-                }
-                
-                const data = await response.json();
-                
-                // Store the token in localStorage
-                localStorage.setItem('token', data.access_token);
-                
-                // Redirect to the models page
+                // Redirigir a la página de modelos
                 window.location.href = '/models';
-                
             } catch (error) {
+                console.error("Login failed:", error.message);
                 loginError.textContent = error.message;
                 loginError.classList.remove('d-none');
             } finally {
-                // Hide spinner and enable button
+                // Ocultar spinner y habilitar botón
                 loginButton.disabled = false;
                 loginSpinner.classList.add('d-none');
             }

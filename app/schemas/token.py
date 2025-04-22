@@ -9,3 +9,6 @@ class Token(BaseModel):
 
 class TokenPayload(BaseModel):
     sub: Optional[int] = None
+
+    class Config:
+        from_attributes = True

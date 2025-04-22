@@ -5,7 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
-from app.core.auth import get_password_hash
+from app.core.utils import get_password_hash
 from app.models.models import Base, User, Model
 
 # Convert SQLite URL to async format
