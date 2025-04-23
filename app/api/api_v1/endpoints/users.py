@@ -2,7 +2,7 @@ from typing import Any, List
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, and_
 
 from app.core.auth import get_current_admin_user
 from app.core.utils import get_password_hash
@@ -154,12 +154,20 @@ async def delete_user(
             detail="User not found",
         )
     
-    # Don't allow deleting the admin user
+    # Prevent deletion of default admin unless another admin exists
     if user.username == "admin":
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot delete the admin user",
+        # Check if there are other admin users excluding the default admin
+        result = await db.execute(
+            select(User).where(
+                and_(User.is_admin == True, User.id != user_id)
+            )
         )
+        other_admin = result.scalars().first()
+        if not other_admin:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot delete the only admin user",
+            )
     
     await db.delete(user)
     await db.commit()

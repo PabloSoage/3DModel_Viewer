@@ -13,6 +13,9 @@ from app.api.api_v1.api import api_router
 from app.core.auth import get_current_active_user, get_current_admin_user, get_current_user
 from app.db.init_db import init_db, get_db
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from app.models.models import User
+from app.core.utils import verify_password
 
 # Setup logging
 logging.basicConfig(
@@ -63,9 +66,21 @@ async def root(request: Request):
     return RedirectResponse(url="/login")
 
 @app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request, response: Response):
+async def login_page(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
     """Login page."""
-    return templates.TemplateResponse("login.html", {"request": request})
+    # Determine whether to show default admin credentials hint
+    result = await db.execute(select(User).where(User.username == "admin"))
+    admin_user = result.scalars().first()
+    show_default_hint = False
+    if admin_user and admin_user.is_active and verify_password("admin", admin_user.hashed_password):
+        show_default_hint = True
+    return templates.TemplateResponse(
+        "login.html", {"request": request, "show_default_hint": show_default_hint}
+    )
 
 # Función auxiliar para manejar la autenticación con cookies
 async def get_current_user_from_cookie(
@@ -76,7 +91,7 @@ async def get_current_user_from_cookie(
     if not token:
         # Si no hay token en la cookie, intentar obtener del encabezado Authorization
         auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
+        if (auth_header and auth_header.startswith("Bearer ")):
             token = auth_header.split(" ")[1]
     
     if not token:

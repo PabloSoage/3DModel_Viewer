@@ -27,9 +27,11 @@
                     </div>
                 </form>
                 <div class="alert alert-danger mt-3 d-none" id="login-error"></div>
+                {% if show_default_hint %}
                 <div class="alert alert-info mt-3" role="alert">
                     <small>Default admin credentials: username: <strong>admin</strong>, password: <strong>admin</strong></small>
                 </div>
+                {% endif %}
             </div>
         </div>
     </div>
