@@ -1,10 +1,13 @@
 import os
 import secrets
 from typing import Optional, Dict, Any, List
+from pathlib import Path
 
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
 
+# Base directory of the project
+default_base = Path(__file__).parents[2]
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "3D Model Viewer"
@@ -16,8 +19,8 @@ class Settings(BaseSettings):
     # 60 minutes * 24 hours * 7 days = 7 days
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7
     
-    # Base directory for 3D models
-    MODELS_BASE_DIR: str = os.path.abspath(r"D:/Downloads+/3DModel_Viewer/models")
+    # Base directory for 3D models (override with env var)
+    MODELS_BASE_DIR: Path = Path(os.getenv('MODELS_BASE_DIR', default_base / 'models'))
     
     # Supported media file extensions for previews
     MEDIA_EXTENSIONS: List[str] = [
@@ -39,20 +42,22 @@ class Settings(BaseSettings):
     # Database settings
     DATABASE_URL: str = f"sqlite:///./app/db/app.db"
     
-    # STL preview settings
-    STL_PREVIEW_DIR: str = os.path.abspath(r"D:/Downloads+/3DModel_Viewer/app/static/previews")
+    # STL preview directory (override with env var)
+    STL_PREVIEW_DIR: Path = Path(os.getenv('STL_PREVIEW_DIR', default_base / 'app' / 'static' / 'previews'))
     
-    @field_validator("STL_PREVIEW_DIR", mode="before")
+    @field_validator('MODELS_BASE_DIR', mode='before')
+    @classmethod
+    def create_models_dir(cls, v):
+        os.makedirs(v, exist_ok=True)
+        return str(v)
+
+    @field_validator('STL_PREVIEW_DIR', mode='before')
     def create_stl_preview_dir(cls, v):
         os.makedirs(v, exist_ok=True)
-        return v
+        return str(v)
     
     class Config:
         case_sensitive = True
 
 
 settings = Settings()
-
-# Create directories if they don't exist
-os.makedirs(settings.MODELS_BASE_DIR, exist_ok=True)
-os.makedirs(settings.STL_PREVIEW_DIR, exist_ok=True)

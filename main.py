@@ -188,6 +188,28 @@ async def admin_users_page(
             # Si no tiene permisos, mostrar página de error o redirigir
             return RedirectResponse(url="/models", status_code=302)
 
+@app.get("/admin/settings", response_class=HTMLResponse)
+async def admin_settings_page(
+    request: Request,
+    response: Response,
+    token: Optional[str] = Cookie(None),
+    db: AsyncSession = Depends(get_db)
+):
+    """Settings administration page."""
+    try:
+        current_user = await get_current_user_from_cookie(token, request, db)
+        if not current_user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="The user doesn't have enough privileges"
+            )
+        return templates.TemplateResponse("admin_settings.html", {"request": request, "user": current_user})
+    except HTTPException as e:
+        if e.status_code == 401:
+            return RedirectResponse(url="/login", status_code=302)
+        else:
+            return RedirectResponse(url="/models", status_code=302)
+
 if __name__ == "__main__":
     import uvicorn
     # Run the application with the module:app format

@@ -3,6 +3,7 @@ import logging
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
+from typing import AsyncGenerator
 
 from app.core.config import settings
 from app.core.utils import get_password_hash
@@ -33,7 +34,7 @@ AsyncSessionLocal = sessionmaker(
 )
 
 # Dependency to get DB session
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         yield session
 
@@ -67,6 +68,22 @@ async def init_db() -> None:
                 # Fetch existing admin user if present
                 result = await db.execute(select(User).where(User.username == "admin"))
                 admin_user = result.scalars().first()
+
+            # Seed application settings with defaults
+            from sqlalchemy import select as select_setting
+            from app.models.models import Setting
+            default_settings = {
+                'MODELS_BASE_DIR': settings.MODELS_BASE_DIR,
+                'STL_PREVIEW_DIR': settings.STL_PREVIEW_DIR,
+            }
+            for key, val in default_settings.items():
+                result = await db.execute(select_setting(Setting).where(Setting.key == key))
+                existing = result.scalars().first()
+                if not existing:
+                    new_setting = Setting(key=key, value=val)
+                    db.add(new_setting)
+                    logging.info(f"Seeded config setting: {key}")
+            await db.commit()
 
             # Discover and add 3D models in the models directory
             models_dir = settings.MODELS_BASE_DIR

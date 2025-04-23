@@ -90,6 +90,14 @@
                         adminModelsLink.innerHTML = '<a class="nav-link" href="/admin/models"><i class="bi bi-gear"></i> Admin Models</a>';
                         mainNav.appendChild(adminModelsLink);
                     }
+
+                    // Agregar enlace a Settings si no estamos ya en esa página
+                    if (!window.location.pathname.includes('/admin/settings')) {
+                        const settingsLink = document.createElement('li');
+                        settingsLink.className = 'nav-item';
+                        settingsLink.innerHTML = '<a class="nav-link" href="/admin/settings"><i class="bi bi-sliders"></i> Settings</a>';
+                        mainNav.appendChild(settingsLink);
+                    }
                 }
             }
             

@@ -50,3 +50,10 @@ class Model(Base):
         secondary=user_model_permissions,
         back_populates="models"
     )
+
+# Add dynamic application settings
+class Setting(Base):
+    __tablename__ = "settings"
+
+    key = Column(String, primary_key=True, index=True)
+    value = Column(String, nullable=False)

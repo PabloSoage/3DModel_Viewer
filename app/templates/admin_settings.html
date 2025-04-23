@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+
+{% block title %}Admin: Settings - 3D Model Viewer{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+  <div class="col-md-8">
+    <h1 class="mb-0">Application Settings</h1>
+    <p class="text-muted">Manage dynamic configuration values</p>
+  </div>
+  <div class="col-md-4 text-end">
+    <button class="btn btn-outline-primary" id="refresh-settings"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+  </div>
+</div>
+
+<table class="table table-striped" id="settings-table">
+  <thead>
+    <tr>
+      <th>Key</th>
+      <th>Value</th>
+      <th class="text-end">Actions</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<!-- File Browser Modal -->
+<div class="modal fade" id="fileBrowserModal" tabindex="-1" aria-labelledby="fileBrowserLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="fileBrowserLabel">Select Directory</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <ul class="list-group" id="file-list"></ul>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', async () => {
+  const token = localStorage.getItem('token');
+  const tableBody = document.querySelector('#settings-table tbody');
+  const refreshBtn = document.getElementById('refresh-settings');
+  let currentDirKey = null;
+
+  async function loadSettings() {
+    try {
+      const res = await fetch('/api/v1/settings', { headers: { 'Authorization': `Bearer ${token}` } });
+      const settings = await res.json();
+      tableBody.innerHTML = '';
+      settings.forEach(s => {
+        const tr = document.createElement('tr');
+        // Show browse only for directory settings
+        const canBrowse = ['MODELS_BASE_DIR', 'STL_PREVIEW_DIR'].includes(s.key);
+        tr.innerHTML = `
+          <td>${s.key}</td>
+          <td><input type="text" class="form-control" value="${s.value}" data-key="${s.key}"></td>
+          <td class="text-end">
+            ${canBrowse ? `<button class="btn btn-sm btn-secondary browse-btn" data-key="${s.key}"><i class="bi bi-folder"></i></button>` : ''}
+            <button class="btn btn-sm btn-primary save-btn" data-key="${s.key}"><i class="bi bi-save"></i> Save</button>
+          </td>`;
+        tableBody.appendChild(tr);
+      });
+      attachActions();
+    } catch (e) { console.error(e); }
+  }
+
+  function attachActions() {
+    document.querySelectorAll('.save-btn').forEach(btn => {
+      btn.onclick = async () => {
+        const key = btn.dataset.key;
+        const input = document.querySelector(`input[data-key="${key}"]`);
+        const value = input.value;
+        await fetch(`/api/v1/settings/${key}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ key, value })
+        });
+        showToast(`Setting ${key} updated`, 'success');
+      };
+    });
+    document.querySelectorAll('.browse-btn').forEach(btn => {
+      btn.onclick = () => {
+        currentDirKey = btn.dataset.key;
+        openBrowserDialog();
+      };
+    });
+  }
+
+  async function openBrowserDialog() {
+    const input = document.querySelector(`input[data-key="${currentDirKey}"]`);
+    // Normalize Windows backslashes to forward slashes for URL encoding
+    let base = input.value.replace(/\\/g, '/');
+    console.log('Opening directory browser for:', base);
+    // Fetch directory listing; encode path properly
+    const res = await fetch(`/api/v1/settings/files?path=${encodeURIComponent(base)}`, { headers: { 'Authorization': `Bearer ${token}` } });
+    // Handle non-OK responses (e.g., path not found)
+    if (!res.ok) {
+      let err = 'Unknown error';
+      try {
+        const json = await res.json(); err = json.detail || JSON.stringify(json);
+      } catch {}
+      showToast(`Error: ${err}`, 'danger');
+      return;
+    }
+    const items = await res.json();
+    if (!Array.isArray(items)) {
+      showToast('Invalid directory listing', 'danger');
+      return;
+    }
+    const list = document.getElementById('file-list');
+    list.innerHTML = '';
+    if (!items || items.length === 0) {
+      const li = document.createElement('li');
+      li.className = 'list-group-item';
+      li.textContent = 'No items found';
+      list.appendChild(li);
+    }
+    items.forEach(item => {
+      if (item.path) {
+        const li = document.createElement('li');
+        li.className = 'list-group-item list-group-item-action';
+        li.textContent = item.path;
+        li.onclick = () => {
+          input.value = item.path;
+          showToast(`Selected ${item.path}`, 'info');
+          bootstrap.Modal.getInstance(document.getElementById('fileBrowserModal')).hide();
+        };
+        list.appendChild(li);
+      }
+    });
+    const modal = new bootstrap.Modal(document.getElementById('fileBrowserModal'));
+    modal.show();
+  }
+
+  refreshBtn.addEventListener('click', loadSettings);
+  loadSettings();
+});
+</script>
+{% endblock %}
