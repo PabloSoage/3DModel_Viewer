@@ -73,8 +73,8 @@ async def init_db() -> None:
             from sqlalchemy import select as select_setting
             from app.models.models import Setting
             default_settings = {
-                'MODELS_BASE_DIR': settings.MODELS_BASE_DIR,
-                'STL_PREVIEW_DIR': settings.STL_PREVIEW_DIR,
+                'MODELS_BASE_DIR': str(settings.MODELS_BASE_DIR),
+                'STL_PREVIEW_DIR': str(settings.STL_PREVIEW_DIR),
             }
             for key, val in default_settings.items():
                 result = await db.execute(select_setting(Setting).where(Setting.key == key))
@@ -92,12 +92,12 @@ async def init_db() -> None:
                     model_path = os.path.join(models_dir, item)
                     if os.path.isdir(model_path):
                         # Check if model already exists in database
-                        result = await db.execute(select(Model).where(Model.path == model_path))
+                        result = await db.execute(select(Model).where(Model.path == str(model_path)))
                         existing_model = result.scalars().first()
                         if not existing_model:
                             model = Model(
                                 name=item,
-                                path=model_path,
+                                path=str(model_path),
                                 description=f"Auto-discovered model: {item}"
                             )
                             db.add(model)
