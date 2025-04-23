@@ -70,6 +70,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         tableBody.appendChild(tr);
       });
       attachActions();
+      // Disable save buttons until a change is made
+      document.querySelectorAll('input[data-key]').forEach(input => {
+        const key = input.dataset.key;
+        input.dataset.original = input.value;
+        const btn = document.querySelector(`button.save-btn[data-key="${key}"]`);
+        if (btn) btn.disabled = true;
+        input.addEventListener('input', () => {
+          if (btn) btn.disabled = (input.value === input.dataset.original);
+        });
+      });
     } catch (e) { console.error(e); }
   }
 
@@ -84,6 +94,9 @@ document.addEventListener('DOMContentLoaded', async () => {
           body: JSON.stringify({ key, value })
         });
         showToast(`Setting ${key} updated`, 'success');
+        // Update original value after save
+        input.dataset.original = value;
+        btn.disabled = true;
       };
     });
     document.querySelectorAll('.browse-btn').forEach(btn => {
@@ -94,10 +107,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  async function openBrowserDialog() {
+  // Helper function to update input value and enable save button
+  function updateInputValue(key, value) {
+    const input = document.querySelector(`input[data-key="${key}"]`);
+    if (input) {
+      input.value = value;
+      // Enable save button if value changed
+      const saveBtn = document.querySelector(`button.save-btn[data-key="${key}"]`);
+      if (saveBtn) {
+        saveBtn.disabled = (value === input.dataset.original);
+      }
+    }
+  }
+
+  async function openBrowserDialog(overridePath) {
     const input = document.querySelector(`input[data-key="${currentDirKey}"]`);
-    // Normalize Windows backslashes to forward slashes for URL encoding
-    let base = input.value.replace(/\\/g, '/');
+    // Determine directory to browse: either override or current input
+    let base = overridePath !== undefined ? overridePath.replace(/\\/g, '/') : input.value.replace(/\\/g, '/');
     console.log('Opening directory browser for:', base);
     // Fetch directory listing; encode path properly
     const res = await fetch(`/api/v1/settings/files?path=${encodeURIComponent(base)}`, { headers: { 'Authorization': `Bearer ${token}` } });
@@ -115,29 +141,42 @@ document.addEventListener('DOMContentLoaded', async () => {
       showToast('Invalid directory listing', 'danger');
       return;
     }
+    
+    // Clear and rebuild file list
     const list = document.getElementById('file-list');
     list.innerHTML = '';
+    // Show modal first to avoid UI glitches
+    const modalElement = document.getElementById('fileBrowserModal');
+    if (!bootstrap.Modal.getInstance(modalElement)) {
+      const modal = new bootstrap.Modal(modalElement);
+      modal.show();
+    }
+    
     if (!items || items.length === 0) {
       const li = document.createElement('li');
       li.className = 'list-group-item';
       li.textContent = 'No items found';
       list.appendChild(li);
     }
+    
     items.forEach(item => {
-      if (item.path) {
-        const li = document.createElement('li');
-        li.className = 'list-group-item list-group-item-action';
-        li.textContent = item.path;
-        li.onclick = () => {
-          input.value = item.path;
+      const li = document.createElement('li');
+      li.className = 'list-group-item list-group-item-action';
+      li.textContent = item.name === '..' ? '..' : item.name;
+      li.onclick = () => {
+        if (item.name === '..') {
+          // navigate up without closing modal
+          openBrowserDialog(item.path);
+        } else {
+          // select this directory or file
+          updateInputValue(currentDirKey, item.path);
           showToast(`Selected ${item.path}`, 'info');
-          bootstrap.Modal.getInstance(document.getElementById('fileBrowserModal')).hide();
-        };
-        list.appendChild(li);
-      }
+          const modal = bootstrap.Modal.getInstance(modalElement);
+          if (modal) modal.hide();
+        }
+      };
+      list.appendChild(li);
     });
-    const modal = new bootstrap.Modal(document.getElementById('fileBrowserModal'));
-    modal.show();
   }
 
   refreshBtn.addEventListener('click', loadSettings);
