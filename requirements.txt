@@ -13,3 +13,7 @@ python-dotenv>=1.0.0
 typing-extensions>=4.5.0
 httpx>=0.24.0
 mimetypes-magic>=0.1.0
+
+# Added for pydantic-settings support
+pydantic-settings>=1.0.0
+email_validator>=1.0.0
