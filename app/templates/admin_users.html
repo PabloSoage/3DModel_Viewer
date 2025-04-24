@@ -256,7 +256,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     const row = document.createElement('tr');
                     
                     // Determine if delete should be disabled for this user
-                    const disableDelete = (user.username === 'admin' && adminCount <= 1) ? 'disabled' : '';
+                    const disableDelete = (user.is_admin && adminCount <= 1) ? 'disabled' : '';
                     row.innerHTML = `
                         <td>${user.id}</td>
                         <td>${user.username}</td>

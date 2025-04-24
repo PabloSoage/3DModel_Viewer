@@ -84,28 +84,76 @@ async def init_db() -> None:
                     db.add(new_setting)
                     logging.info(f"Seeded config setting: {key}")
             await db.commit()
-
-            # Discover and add 3D models in the models directory
-            models_dir = settings.MODELS_BASE_DIR
-            if os.path.exists(models_dir) and os.path.isdir(models_dir):
-                for item in os.listdir(models_dir):
-                    model_path = os.path.join(models_dir, item)
-                    if os.path.isdir(model_path):
-                        # Check if model already exists in database
-                        result = await db.execute(select(Model).where(Model.path == str(model_path)))
-                        existing_model = result.scalars().first()
-                        if not existing_model:
-                            model = Model(
-                                name=item,
-                                path=str(model_path),
-                                description=f"Auto-discovered model: {item}"
-                            )
-                            db.add(model)
-                            # Grant admin access if admin_user exists
-                            if admin_user:
-                                model.users.append(admin_user)
-                            logging.info(f"Added model: {item}")
-                await db.commit()
     except Exception as e:
         logging.error(f"Error initializing database: {str(e)}")
         raise
+
+async def discover_models() -> None:
+    """
+    Discover and add 3D models from the models directory into the database.
+    """
+    from sqlalchemy import select
+    from app.models.models import Model, User as UserModel
+    async with AsyncSessionLocal() as db:
+        # Fetch admin user for default grant
+        result = await db.execute(select(UserModel).where(UserModel.username == 'admin'))
+        admin_user = result.scalars().first()
+        models_dir = settings.MODELS_BASE_DIR
+        if os.path.exists(models_dir) and os.path.isdir(models_dir):
+            for item in os.listdir(models_dir):
+                model_path = os.path.join(models_dir, item)
+                if os.path.isdir(model_path):
+                    # Check if already exists
+                    result = await db.execute(select(Model).where(Model.path == str(model_path)))
+                    existing = result.scalars().first()
+                    if not existing:
+                        model = Model(
+                            name=item,
+                            path=str(model_path),
+                            description=f"Auto-discovered model: {item}"
+                        )
+                        db.add(model)
+                        if admin_user:
+                            model.users.append(admin_user)
+                        logging.info(f"Discovered model: {item}")
+            await db.commit()
+
+async def discover_models_in_batches(batch_size: int = 50):
+    """
+    Discover and add 3D models in batches to avoid long blocking scans.
+    """
+    import os
+    import asyncio
+    from sqlalchemy import select
+    from app.core.config import settings
+    from app.models.models import Model, User as UserModel
+
+    models_dir = settings.MODELS_BASE_DIR
+    if not os.path.isdir(models_dir):
+        return
+
+    # Prepare list of model directories
+    dirs = [item for item in os.listdir(models_dir) if os.path.isdir(os.path.join(models_dir, item))]
+    total = len(dirs)
+    idx = 0
+    # Chunked processing
+    while idx < total:
+        chunk = dirs[idx:idx + batch_size]
+        async with AsyncSessionLocal() as db:
+            # Fetch admin user once per batch
+            result = await db.execute(select(UserModel).where(UserModel.username == 'admin'))
+            admin_user = result.scalars().first()
+            for item in chunk:
+                path = os.path.join(models_dir, item)
+                # Skip if exists
+                res = await db.execute(select(Model).where(Model.path == str(path)))
+                if res.scalars().first():
+                    continue
+                model = Model(name=item, path=str(path), description=f"Auto-discovered: {item}")
+                db.add(model)
+                if admin_user:
+                    model.users.append(admin_user)
+            await db.commit()
+        idx += batch_size
+        # yield to event loop
+        await asyncio.sleep(0)
