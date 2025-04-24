@@ -4,6 +4,7 @@ from typing import Optional, Union, Any
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
+from fastapi import Cookie, Request, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -76,3 +77,62 @@ async def get_current_admin_user(current_user: User = Depends(get_current_active
             detail="The user doesn't have enough privileges"
         )
     return current_user
+
+async def get_current_user_from_cookie(
+    token: Optional[str] = Cookie(None),
+    request: Request = None,
+    db: AsyncSession = Depends(get_db)
+) -> User:
+    """
+    Get current user from cookie or Authorization header.
+    """
+    # Try cookie first
+    if not token:
+        auth_header = request.headers.get('Authorization')
+        if (auth_header and auth_header.startswith('Bearer ')):
+            token = auth_header.split(' ')[1]
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail='Not authenticated',
+            headers={'WWW-Authenticate': 'Bearer'},
+        )
+    return await get_current_user(token, db)
+
+async def get_current_active_user_cookie(
+    current_user: User = Depends(get_current_user_from_cookie)
+) -> User:
+    """Get current active user via cookie-based auth."""
+    if not current_user.is_active:
+        raise HTTPException(status_code=400, detail='Inactive user')
+    return current_user
+
+async def get_current_admin_user_cookie(
+    current_user: User = Depends(get_current_active_user_cookie)
+) -> User:
+    """Get current admin user via cookie-based auth."""
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The user doesn't have enough privileges",
+        )
+    return current_user
+
+async def get_current_active_user_any(
+    token: Optional[str] = Cookie(None),
+    authorization: str = Depends(oauth2_scheme),
+    request: Request = None,
+    db: AsyncSession = Depends(get_db)
+) -> User:
+    """
+    Get current active user from cookie or OAuth2 bearer token.
+    """
+    # Try cookie first
+    if token:
+        user = await get_current_user_from_cookie(token, request, db)
+    else:
+        # authorization provided by oauth2_scheme
+        user = await get_current_active_user(authorization, db)
+    if not user.is_active:
+        raise HTTPException(status_code=400, detail="Inactive user")
+    return user

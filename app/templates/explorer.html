@@ -550,38 +550,55 @@
         }
         
         // Handle file click
-        function handleFileClick(file) {
+        async function handleFileClick(file) {
             currentFile = file;
             previewTitle.textContent = file.name;
             showPreviewLoading();
             resetViewers();
             fileActionButtons.classList.remove('d-none');
-            
             const extension = file.name.split('.').pop().toLowerCase();
             
             if (file.media_type && file.media_type.startsWith('image/')) {
-                // Image preview
-                filePreview.src = `/api/v1/files/download?path=${encodeURIComponent(file.path)}`;
-                filePreview.onload = () => {
-                    filePreview.style.display = 'block';
-                    hidePreviewLoading();
-                };
-                filePreview.onerror = () => {
-                    showPreviewError('Failed to load image');
-                };
+                // Image preview via fetch to include auth header
+                try {
+                    const resp = await Auth.fetch(`/api/v1/files/download?path=${encodeURIComponent(file.path)}`);
+                    if (!resp || !resp.ok) throw new Error('Unauthorized');
+                    const blob = await resp.blob();
+                    const url = URL.createObjectURL(blob);
+                    filePreview.src = url;
+                    filePreview.onload = () => { filePreview.style.display = 'block'; hidePreviewLoading(); };
+                } catch (e) {
+                    showPreviewError(e.message || 'Failed to load image');
+                }
                 
                 // Show download button, hide view text button
                 downloadFileButton.style.display = 'inline-block';
                 viewFileButton.style.display = 'none';
                 
             } else if (extension === 'stl') {
-                // STL preview
-                initThreeJS();
-                loadSTLFile(file.path);
-                
-                // Show download button, hide view text button
-                downloadFileButton.style.display = 'inline-block';
-                viewFileButton.style.display = 'none';
+                // STL preview via fetch to include auth
+                showPreviewLoading();
+                try {
+                    const resp = await Auth.fetch(`/api/v1/files/download?path=${encodeURIComponent(file.path)}`);
+                    if (!resp || !resp.ok) throw new Error('Unauthorized');
+                    const arrayBuf = await resp.arrayBuffer();
+                    initThreeJS();
+                    // parse STL data
+                    const geometry = new THREE.STLLoader().parse(arrayBuf);
+                    // rest of loader logic
+                    if (mesh) scene.remove(mesh);
+                    const material = new THREE.MeshPhongMaterial({wireframe});
+                    mesh = new THREE.Mesh(geometry, material);
+                    // center and add mesh, then hide loading
+                    geometry.computeBoundingBox();
+                    const center = new THREE.Vector3();
+                    geometry.boundingBox.getCenter(center);
+                    mesh.position.set(-center.x, -center.y, -center.z);
+                    scene.add(mesh);
+                    resetCameraView(); hidePreviewLoading();
+                } catch (e) {
+                    showPreviewError(e.message || 'Failed to load STL');
+                }
                 
             } else if (['txt', 'md', 'json', 'log', 'html', 'xml', 'css', 'js'].includes(extension)) {
                 // Text file preview
@@ -854,29 +871,42 @@
         }
         
         // Download current file
-        function downloadFile(path) {
-            const downloadUrl = `/api/v1/files/download?path=${encodeURIComponent(path)}`;
-            
-            // Create a temporary link and trigger download
-            const link = document.createElement('a');
-            link.href = downloadUrl;
-            link.download = path.split('/').pop();
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+        async function downloadFile(path) {
+            try {
+                const resp = await Auth.fetch(`/api/v1/files/download?path=${encodeURIComponent(path)}`);
+                if (!resp || !resp.ok) throw new Error('Unauthorized');
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = path.split('/').pop();
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                showToast(`Error: ${e.message}`, 'danger');
+            }
         }
         
         // Download current directory as zip
-        function downloadDirectoryAsZip(path) {
-            const downloadUrl = `/api/v1/files/download-zip?path=${encodeURIComponent(path)}`;
-            
-            // Create a temporary link and trigger download
-            const link = document.createElement('a');
-            link.href = downloadUrl;
-            link.download = path.split('/').pop() + '.zip';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+        async function downloadDirectoryAsZip(path) {
+            // Fetch zip to include auth header
+            try {
+                const resp = await Auth.fetch(`/api/v1/files/download-zip?path=${encodeURIComponent(path)}`);
+                if (!resp || !resp.ok) throw new Error('Unauthorized');
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = path.split('/').pop() + '.zip';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                showToast(`Error: ${e.message}`, 'danger');
+            }
         }
         
         // Event listeners
@@ -885,13 +915,26 @@
             loadMediaFiles(currentPath);
         });
         
-        downloadFolderButton.addEventListener('click', () => {
+        downloadFolderButton.addEventListener('click', async () => {
             downloadDirectoryAsZip(currentPath);
         });
         
-        downloadFileButton.addEventListener('click', () => {
-            if (currentFile) {
-                downloadFile(currentFile.path);
+        downloadFileButton.addEventListener('click', async () => {
+            if (!currentFile) return;
+            try {
+                const resp = await Auth.fetch(`/api/v1/files/download?path=${encodeURIComponent(currentFile.path)}`);
+                if (!resp || !resp.ok) throw new Error('Unauthorized');
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = currentFile.name;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                showToast(`Error: ${e.message}`, 'danger');
             }
         });
         

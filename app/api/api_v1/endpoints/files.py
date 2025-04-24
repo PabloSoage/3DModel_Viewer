@@ -13,8 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import mimetypes
 
 from app.core.auth import (
-    get_current_active_user,
-    get_current_admin_user
+    get_current_active_user_cookie as get_current_active_user,
+    get_current_admin_user_cookie as get_current_admin_user
 )
 from app.db.init_db import get_db
 from app.core.config import settings

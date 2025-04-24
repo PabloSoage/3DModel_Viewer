@@ -31,7 +31,7 @@ const Auth = {
             localStorage.setItem('token', token);
             
             // También establecer el token como cookie
-            this.setCookie('token', token, 7); // Cookie válida por 7 días
+            this.setCookie('token', token, 7); // Cookie válida por 7 días (SameSite=Lax)
             console.log("Token set as cookie");
         } else {
             console.error("Attempted to set invalid token");
@@ -46,7 +46,7 @@ const Auth = {
             date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
             expires = "; expires=" + date.toUTCString();
         }
-        document.cookie = name + "=" + encodeURIComponent(value) + expires + "; path=/; SameSite=Strict";
+        document.cookie = name + "=" + encodeURIComponent(value) + expires + "; path=/; SameSite=Lax";
     },
     
     // Obtener una cookie por nombre
