@@ -77,3 +77,23 @@ body {
     background-color: #f8f9fa;
     border-bottom: 1px solid rgba(0, 0, 0, 0.1);
 }
+
+/* Added: Expanded preview in models grid when description is hidden */
+.model-preview-container.expanded-preview {
+    height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.model-preview-container.expanded-preview img {
+    max-height: 100%;
+    width: auto;
+}
+
+/* Enlarge model preview on hover */
+.model-preview-container img:hover {
+    transform: scale(1.6);
+    transition: transform 0.2s ease-in-out;
+    z-index: 5;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+}

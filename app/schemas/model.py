@@ -8,6 +8,8 @@ class ModelBase(BaseModel):
     name: str
     path: str
     description: Optional[str] = None
+    # Optional stored preview image path
+    preview_image: Optional[str] = None
 
 
 # Properties to receive via API on creation
@@ -19,6 +21,7 @@ class ModelCreate(ModelBase):
 class ModelUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    preview_image: Optional[str] = None
 
 
 # Properties shared by models stored in DB

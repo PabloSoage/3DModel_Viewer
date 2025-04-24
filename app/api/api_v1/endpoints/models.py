@@ -13,7 +13,7 @@ from app.core.auth import (
 from app.db.init_db import get_db
 from app.core.config import settings
 from app.models.models import User, Model, user_model_permissions
-from app.schemas.model import Model as ModelSchema, ModelPermission
+from app.schemas.model import Model as ModelSchema, ModelPermission, ModelUpdate
 
 router = APIRouter()
 
@@ -88,6 +88,31 @@ async def read_model(
                 detail="Not enough permissions to access this model",
             )
     
+    return model
+
+
+@router.put("/{model_id}", response_model=ModelSchema)
+async def update_model(
+    model_id: int,
+    model_in: ModelUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+) -> Any:
+    """
+    Update model metadata (description, preview image).
+    Only admins can update.
+    """
+    result = await db.execute(select(Model).where(Model.id == model_id))
+    model = result.scalars().first()
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found")
+    # Update fields
+    if model_in.description is not None:
+        model.description = model_in.description
+    if model_in.preview_image is not None:
+        model.preview_image = model_in.preview_image
+    await db.commit()
+    await db.refresh(model)
     return model
 
 

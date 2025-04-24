@@ -164,6 +164,9 @@
                     <button class="btn btn-sm btn-outline-secondary" id="view-file-button">
                         <i class="bi bi-file-text"></i> View Text
                     </button>
+                    <div id="set-preview-button" class="btn btn-sm btn-outline-warning" style="display: none;">
+                        <i class="bi bi-star"></i> Set as Preview
+                    </div>
                 </div>
             </div>
             <div class="card-body p-0">
@@ -268,6 +271,7 @@
         const textViewerModal = document.getElementById('textViewerModal');
         const textViewerModalLabel = document.getElementById('textViewerModalLabel');
         const downloadTextFileButton = document.getElementById('download-text-file-button');
+        const setPreviewButton = document.getElementById('set-preview-button');
         
         // Variables
         let currentPath = '';
@@ -424,78 +428,81 @@
                 </div>
             `;
             
-            try {
-                const response = await fetch(`/api/v1/explorer/media-files/?path=${encodeURIComponent(path)}`, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
+            // Try to use cached media files
+            const cacheKey = `mediaFiles_${encodeURIComponent(path)}`;
+            let mediaFiles;
+            const cached = localStorage.getItem(cacheKey);
+            if (cached) {
+                try {
+                    mediaFiles = JSON.parse(cached);
+                } catch {}
+            }
+            if (!mediaFiles) {
+                try {
+                    const response = await Auth.fetch(`/api/v1/explorer/media-files/?path=${encodeURIComponent(path)}`);
+                    if (response && response.ok) {
+                        mediaFiles = await response.json();
+                        // Cache result for next loads
+                        localStorage.setItem(cacheKey, JSON.stringify(mediaFiles));
+                    } else {
+                        throw new Error('Failed to load media files');
                     }
-                });
-                
-                if (!response.ok) {
-                    throw new Error('Failed to load media files');
-                }
-                
-                const mediaFiles = await response.json();
-                
-                mediaGallery.innerHTML = '';
-                
-                if (mediaFiles.length === 0) {
-                    mediaGallery.innerHTML = `
-                        <div class="text-center py-3">
-                            <div class="text-muted">
-                                <i class="bi bi-images"></i>
-                            </div>
-                            <p class="text-muted small">No media files found</p>
-                        </div>
-                    `;
+                } catch (error) {
+                    console.error('Error loading media files:', error);
+                    mediaGallery.innerHTML = `<div class="alert alert-danger m-3"><small><i class="bi bi-exclamation-triangle-fill"></i> ${error.message}</small></div>`;
                     return;
                 }
-                
-                // Create a simple gallery grid
-                const galleryRow = document.createElement('div');
-                galleryRow.className = 'row g-2';
-                
-                mediaFiles.slice(0, 12).forEach(file => {
-                    const isImage = file.media_type && file.media_type.startsWith('image/');
-                    
-                    if (isImage) {
-                        const col = document.createElement('div');
-                        col.className = 'col-4 col-sm-4 mb-2';
-                        
-                        const img = document.createElement('img');
-                        img.src = `/api/v1/files/download?path=${encodeURIComponent(file.path)}`;
-                        img.className = 'img-fluid rounded cursor-pointer';
-                        img.style.height = '60px';
-                        img.style.width = '100%';
-                        img.style.objectFit = 'cover';
-                        img.title = file.name;
-                        img.alt = file.name;
-                        img.addEventListener('click', () => handleFileClick(file));
-                        
-                        col.appendChild(img);
-                        galleryRow.appendChild(col);
-                    }
-                });
-                
-                mediaGallery.appendChild(galleryRow);
-                
-                // If there are more media files than shown in the preview
-                if (mediaFiles.length > 12) {
-                    const moreLink = document.createElement('div');
-                    moreLink.className = 'text-center mt-2';
-                    moreLink.innerHTML = `
-                        <small><a href="#" class="text-muted">+${mediaFiles.length - 12} more files</a></small>
-                    `;
-                    mediaGallery.appendChild(moreLink);
-                }
-                
-            } catch (error) {
-                console.error('Error loading media files:', error);
+            }
+            mediaGallery.innerHTML = '';
+            
+            if (!mediaFiles || mediaFiles.length === 0) {
                 mediaGallery.innerHTML = `
-                    <div class="alert alert-danger m-3">
-                        <small><i class="bi bi-exclamation-triangle-fill"></i> ${error.message}</small>
+                    <div class="text-center py-3">
+                        <div class="text-muted">
+                            <i class="bi bi-images"></i>
+                        </div>
+                        <p class="text-muted small">No media files found</p>
                     </div>
                 `;
+                return;
+            }
+            
+            // Create a simple gallery grid
+            const galleryRow = document.createElement('div');
+            galleryRow.className = 'row g-2';
+            
+            mediaFiles.slice(0, 12).forEach(file => {
+                const isImage = file.media_type && file.media_type.startsWith('image/');
+                
+                if (isImage) {
+                    const col = document.createElement('div');
+                    col.className = 'col-4 col-sm-4 mb-2';
+                    
+                    const img = document.createElement('img');
+                    img.src = `/api/v1/files/download?path=${encodeURIComponent(file.path)}`;
+                    img.className = 'img-fluid rounded cursor-pointer';
+                    img.style.height = '60px';
+                    img.style.width = '100%';
+                    img.style.objectFit = 'cover';
+                    img.title = file.name;
+                    img.alt = file.name;
+                    img.addEventListener('click', () => handleFileClick(file));
+                    
+                    col.appendChild(img);
+                    galleryRow.appendChild(col);
+                }
+            });
+            
+            mediaGallery.appendChild(galleryRow);
+            
+            // If there are more media files than shown in the preview
+            if (mediaFiles.length > 12) {
+                const moreLink = document.createElement('div');
+                moreLink.className = 'text-center mt-2';
+                moreLink.innerHTML = `
+                    <small><a href="#" class="text-muted">+${mediaFiles.length - 12} more files</a></small>
+                `;
+                mediaGallery.appendChild(moreLink);
             }
         }
         
@@ -632,6 +639,10 @@
                 // Show download button, hide view text button
                 downloadFileButton.style.display = 'inline-block';
                 viewFileButton.style.display = 'none';
+            }
+            
+            if (!file.is_dir) {
+                setPreviewButton.style.display = 'inline-block';
             }
         }
         
@@ -991,6 +1002,20 @@
             loadDirectory(e.target.dataset.path);
         });
         
+        setPreviewButton.onclick = async () => {
+            try {
+                const res = await Auth.fetch(`/api/v1/models/${modelId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ preview_image: currentFile.path })
+                });
+                if (!res || !res.ok) throw new Error('Failed to set preview');
+                showToast('Preview image set for model', 'success');
+            } catch (err) {
+                showToast(err.message || 'Error setting preview', 'danger');
+            }
+        };
+
         // Initialize
         loadModelData();
     });

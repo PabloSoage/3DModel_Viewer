@@ -84,6 +84,16 @@ async def init_db() -> None:
                     db.add(new_setting)
                     logging.info(f"Seeded config setting: {key}")
             await db.commit()
+
+            # Ensure 'preview_image' column exists on existing DB
+            from sqlalchemy import text
+            pragma = await db.execute(text("PRAGMA table_info(models)"))
+            cols = [row[1] for row in pragma.fetchall()]
+            if 'preview_image' not in cols:
+                await db.execute(text('ALTER TABLE models ADD COLUMN preview_image TEXT'))
+                await db.commit()
+            
+            # NOTE: Preview_image population skipped synchronously to speed startup; handled in background
     except Exception as e:
         logging.error(f"Error initializing database: {str(e)}")
         raise

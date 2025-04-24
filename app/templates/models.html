@@ -144,41 +144,54 @@
                 if (currentView === 'grid') {
                     const modelCard = modelCardTemplate.content.cloneNode(true);
                     modelCard.querySelector('.model-name').textContent = model.name;
-                    modelCard.querySelector('.model-description').textContent = model.description || 'No description available';
+                    const descEl = modelCard.querySelector('.model-description');
+                    // Hide default auto-discovered descriptions
+                    if (model.description && !model.description.startsWith('Auto-discovered')) {
+                        descEl.textContent = model.description;
+                    } else {
+                        descEl.remove();
+                        // Expand preview container when no description
+                        const previewContainer = modelCard.querySelector('.model-preview-container');
+                        previewContainer.classList.add('expanded-preview');
+                    }
                     
                     const exploreBtn = modelCard.querySelector('.explore-model-btn');
                     exploreBtn.href = `/explorer/${model.id}`;
                     
                     // Add model preview placeholder
                     const previewContainer = modelCard.querySelector('.model-preview-container');
-                    previewContainer.innerHTML = `
-                        <div class="model-preview-spinner text-center">
-                            <div class="spinner-border text-secondary" role="status">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                        </div>
-                    `;
-                    // Fetch and set first image preview
-                    (async () => {
-                        try {
-                            const resp = await Auth.fetch(`/api/v1/explorer/media-files/?path=${encodeURIComponent(model.path)}`);
-                            if (resp && resp.ok) {
-                                const media = await resp.json();
-                                const imgFile = media.find(f => f.media_type && f.media_type.startsWith('image/'));
-                                if (imgFile) {
-                                    const img = document.createElement('img');
-                                    img.src = `/api/v1/files/download?path=${encodeURIComponent(imgFile.path)}`;
-                                    img.className = 'img-fluid rounded';
-                                    img.style.maxHeight = '150px';
-                                    previewContainer.innerHTML = '';
-                                    previewContainer.appendChild(img);
-                                    return;
+                    // Show preview_image directly if set, otherwise spinner + fetch fallback
+                    if (model.preview_image) {
+                        // Use stored preview path
+                        const img = document.createElement('img');
+                        img.src = `/api/v1/files/download?path=${encodeURIComponent(model.preview_image)}`;
+                        img.className = 'img-fluid rounded';
+                        img.style.maxHeight = '150px';
+                        previewContainer.appendChild(img);
+                    } else {
+                        // Lazy load preview if none stored
+                        previewContainer.innerHTML = `
+                            <div class="model-preview-spinner text-center">
+                                <div class="spinner-border text-secondary" role="status"><span class="visually-hidden">Loading...</span></div>
+                            </div>`;
+                        (async () => {
+                            try {
+                                const resp = await Auth.fetch(`/api/v1/explorer/media-files/?path=${encodeURIComponent(model.path)}`);
+                                if (resp && resp.ok) {
+                                    const media = await resp.json();
+                                    const imgFile = media.find(f => f.media_type && f.media_type.startsWith('image/'));
+                                    if (imgFile) {
+                                        const img = document.createElement('img');
+                                        img.src = `/api/v1/files/download?path=${encodeURIComponent(imgFile.path)}`;
+                                        img.className = 'img-fluid rounded';
+                                        img.style.maxHeight = '150px';
+                                        previewContainer.innerHTML = '';
+                                        previewContainer.appendChild(img);
+                                    }
                                 }
-                            }
-                        } catch {}
-                        // fallback placeholder if no image
-                        previewContainer.innerHTML = `<div class="model-preview"><i class="bi bi-box display-1 text-muted"></i></div>`;
-                    })();
+                            } catch {}
+                        })();
+                    }
                     
                     modelsContainer.appendChild(modelCard);
                 } else {

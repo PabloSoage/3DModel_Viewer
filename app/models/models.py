@@ -41,6 +41,8 @@ class Model(Base):
     name = Column(String, index=True)
     path = Column(String, unique=True)
     description = Column(String, nullable=True)
+    # Store path to default preview image
+    preview_image = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
