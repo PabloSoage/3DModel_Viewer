@@ -37,6 +37,7 @@
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="select-dir-btn">Select</button>
       </div>
     </div>
   </div>
@@ -50,6 +51,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   const tableBody = document.querySelector('#settings-table tbody');
   const refreshBtn = document.getElementById('refresh-settings');
   let currentDirKey = null;
+  let currentBrowsePath = null;
+  // Persistent modal instance
+  const modalEl = document.getElementById('fileBrowserModal');
+  const fileBrowserModal = new bootstrap.Modal(modalEl);
 
   async function loadSettings() {
     try {
@@ -122,9 +127,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   async function openBrowserDialog(overridePath) {
     const input = document.querySelector(`input[data-key="${currentDirKey}"]`);
-    // Determine directory to browse: either override or current input
     let base = overridePath !== undefined ? overridePath.replace(/\\/g, '/') : input.value.replace(/\\/g, '/');
-    console.log('Opening directory browser for:', base);
+    currentBrowsePath = base;
+    document.getElementById('fileBrowserLabel').textContent = `Select Directory: ${base}`;
+    
     // Fetch directory listing; encode path properly
     const res = await fetch(`/api/v1/settings/files?path=${encodeURIComponent(base)}`, { headers: { 'Authorization': `Bearer ${token}` } });
     // Handle non-OK responses (e.g., path not found)
@@ -142,16 +148,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
     
-    // Clear and rebuild file list
+    // Clear existing items
     const list = document.getElementById('file-list');
     list.innerHTML = '';
-    // Show modal first to avoid UI glitches
-    const modalElement = document.getElementById('fileBrowserModal');
-    if (!bootstrap.Modal.getInstance(modalElement)) {
-      const modal = new bootstrap.Modal(modalElement);
-      modal.show();
-    }
-    
+    // Show persistent modal instance
+    fileBrowserModal.show();
+
     if (!items || items.length === 0) {
       const li = document.createElement('li');
       li.className = 'list-group-item';
@@ -162,21 +164,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     items.forEach(item => {
       const li = document.createElement('li');
       li.className = 'list-group-item list-group-item-action';
-      li.textContent = item.name === '..' ? '..' : item.name;
+      li.textContent = item.name;
       li.onclick = () => {
-        if (item.name === '..') {
-          // navigate up without closing modal
-          openBrowserDialog(item.path);
-        } else {
-          // select this directory or file
-          updateInputValue(currentDirKey, item.path);
-          showToast(`Selected ${item.path}`, 'info');
-          const modal = bootstrap.Modal.getInstance(modalElement);
-          if (modal) modal.hide();
-        }
+        openBrowserDialog(item.path);
       };
       list.appendChild(li);
     });
+
+    // Select button
+    const selectBtn = document.getElementById('select-dir-btn');
+    selectBtn.onclick = () => {
+      updateInputValue(currentDirKey, currentBrowsePath);
+      showToast(`Selected ${currentBrowsePath}`, 'info');
+      fileBrowserModal.hide();
+    };
   }
 
   refreshBtn.addEventListener('click', loadSettings);
