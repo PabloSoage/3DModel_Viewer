@@ -343,8 +343,8 @@
                 // Clear browser
                 fileBrowser.innerHTML = '';
                 
-                // Show parent directory if exists
-                if (data.parent_path) {
+                // Show parent directory if exists and not at model root
+                if (data.parent_path && data.path !== currentModelData.path) {
                     const parentItem = document.createElement('div');
                     parentItem.className = 'directory-item';
                     parentItem.innerHTML = `<i class="bi bi-arrow-up-circle"></i> ..`;
@@ -578,6 +578,7 @@
             } else if (extension === 'stl') {
                 // STL preview via fetch to include auth
                 showPreviewLoading();
+                stlViewer.style.display = 'block';
                 try {
                     const resp = await Auth.fetch(`/api/v1/files/download?path=${encodeURIComponent(file.path)}`);
                     if (!resp || !resp.ok) throw new Error('Unauthorized');
@@ -585,17 +586,16 @@
                     initThreeJS();
                     // parse STL data
                     const geometry = new THREE.STLLoader().parse(arrayBuf);
-                    // rest of loader logic
                     if (mesh) scene.remove(mesh);
                     const material = new THREE.MeshPhongMaterial({wireframe});
                     mesh = new THREE.Mesh(geometry, material);
-                    // center and add mesh, then hide loading
                     geometry.computeBoundingBox();
                     const center = new THREE.Vector3();
                     geometry.boundingBox.getCenter(center);
                     mesh.position.set(-center.x, -center.y, -center.z);
                     scene.add(mesh);
-                    resetCameraView(); hidePreviewLoading();
+                    resetCameraView();
+                    hidePreviewLoading();
                 } catch (e) {
                     showPreviewError(e.message || 'Failed to load STL');
                 }
@@ -872,8 +872,14 @@
         
         // Download current file
         async function downloadFile(path) {
+            // Show loading spinner on button
+            const origHTML = downloadFileButton.innerHTML;
+            downloadFileButton.disabled = true;
+            downloadFileButton.innerHTML = `<span class="spinner-border spinner-border-sm me-1" role="status"></span> Downloading...`;
             try {
                 const resp = await Auth.fetch(`/api/v1/files/download?path=${encodeURIComponent(path)}`);
+                downloadFileButton.disabled = false;
+                downloadFileButton.innerHTML = origHTML;
                 if (!resp || !resp.ok) throw new Error('Unauthorized');
                 const blob = await resp.blob();
                 const url = URL.createObjectURL(blob);
@@ -885,15 +891,22 @@
                 document.body.removeChild(link);
                 URL.revokeObjectURL(url);
             } catch (e) {
+                downloadFileButton.disabled = false;
+                downloadFileButton.innerHTML = origHTML;
                 showToast(`Error: ${e.message}`, 'danger');
             }
         }
         
         // Download current directory as zip
         async function downloadDirectoryAsZip(path) {
-            // Fetch zip to include auth header
+            // Show loading spinner on button
+            const origHTML = downloadFolderButton.innerHTML;
+            downloadFolderButton.disabled = true;
+            downloadFolderButton.innerHTML = `<span class="spinner-border spinner-border-sm me-1" role="status"></span> Compressing...`;
             try {
                 const resp = await Auth.fetch(`/api/v1/files/download-zip?path=${encodeURIComponent(path)}`);
+                downloadFolderButton.disabled = false;
+                downloadFolderButton.innerHTML = origHTML;
                 if (!resp || !resp.ok) throw new Error('Unauthorized');
                 const blob = await resp.blob();
                 const url = URL.createObjectURL(blob);
@@ -905,6 +918,8 @@
                 document.body.removeChild(link);
                 URL.revokeObjectURL(url);
             } catch (e) {
+                downloadFolderButton.disabled = false;
+                downloadFolderButton.innerHTML = origHTML;
                 showToast(`Error: ${e.message}`, 'danger');
             }
         }

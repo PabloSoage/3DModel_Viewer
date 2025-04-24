@@ -152,10 +152,33 @@
                     // Add model preview placeholder
                     const previewContainer = modelCard.querySelector('.model-preview-container');
                     previewContainer.innerHTML = `
-                        <div class="model-preview">
-                            <i class="bi bi-box display-1 text-muted"></i>
+                        <div class="model-preview-spinner text-center">
+                            <div class="spinner-border text-secondary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
                         </div>
                     `;
+                    // Fetch and set first image preview
+                    (async () => {
+                        try {
+                            const resp = await Auth.fetch(`/api/v1/explorer/media-files/?path=${encodeURIComponent(model.path)}`);
+                            if (resp && resp.ok) {
+                                const media = await resp.json();
+                                const imgFile = media.find(f => f.media_type && f.media_type.startsWith('image/'));
+                                if (imgFile) {
+                                    const img = document.createElement('img');
+                                    img.src = `/api/v1/files/download?path=${encodeURIComponent(imgFile.path)}`;
+                                    img.className = 'img-fluid rounded';
+                                    img.style.maxHeight = '150px';
+                                    previewContainer.innerHTML = '';
+                                    previewContainer.appendChild(img);
+                                    return;
+                                }
+                            }
+                        } catch {}
+                        // fallback placeholder if no image
+                        previewContainer.innerHTML = `<div class="model-preview"><i class="bi bi-box display-1 text-muted"></i></div>`;
+                    })();
                     
                     modelsContainer.appendChild(modelCard);
                 } else {
