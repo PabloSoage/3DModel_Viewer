@@ -9,13 +9,20 @@
         <p class="text-muted">Admin interface <span class="badge bg-info" id="models-count">0 models</span></p>
     </div>
     <div class="col-md-6 text-end">
-        <div class="btn-group">
-            <button class="btn btn-outline-primary" id="refresh-button">
-                <i class="bi bi-arrow-clockwise"></i> Refresh
-            </button>
-            <button class="btn btn-outline-secondary" id="toggle-view-button" data-view="grid">
-                <i class="bi bi-list"></i> List View
-            </button>
+        <!-- Add search bar -->
+        <div class="d-flex justify-content-end gap-2">
+            <div class="input-group me-2" style="max-width: 300px;">
+                <span class="input-group-text"><i class="bi bi-search"></i></span>
+                <input type="text" class="form-control" id="model-search" placeholder="Search models...">
+            </div>
+            <div class="btn-group">
+                <button class="btn btn-outline-primary" id="refresh-button">
+                    <i class="bi bi-arrow-clockwise"></i> Refresh
+                </button>
+                <button class="btn btn-outline-secondary" id="toggle-view-button" data-view="grid">
+                    <i class="bi bi-list"></i> List View
+                </button>
+            </div>
         </div>
     </div>
 </div>
@@ -138,10 +145,116 @@
         const modelCardTemplate = document.getElementById('model-card-template');
         const modelRowTemplate = document.getElementById('model-row-template');
         const noModelsTemplate = document.getElementById('no-models-template');
+        const searchInput = document.getElementById('model-search');
         
         let currentView = 'grid'; // Default view is grid
         let allModels = [];
         let allUsers = [];
+        
+        // Filter models based on search input
+        function filterModels(searchTerm) {
+            searchTerm = searchTerm.toLowerCase().trim();
+            
+            if (!searchTerm) {
+                renderModels();
+                return;
+            }
+            
+            const filteredModels = allModels.filter(model => 
+                model.name.toLowerCase().includes(searchTerm) || 
+                (model.description && model.description.toLowerCase().includes(searchTerm))
+            );
+            
+            renderFilteredModels(filteredModels);
+        }
+        
+        // Render filtered models
+        function renderFilteredModels(models) {
+            modelsContainer.innerHTML = '';
+            
+            // Update model count to show filtered count
+            document.getElementById('models-count').textContent = `${models.length} models`;
+            
+            if (!models.length) {
+                modelsContainer.appendChild(noModelsTemplate.content.cloneNode(true));
+                return;
+            }
+            
+            models.forEach(model => {
+                if (currentView === 'grid') {
+                    const modelCard = modelCardTemplate.content.cloneNode(true);
+                    modelCard.querySelector('.model-name').textContent = model.name;
+                    
+                    const descEl = modelCard.querySelector('.model-description'); 
+                    // Hide default auto-discovered descriptions
+                    if (model.description && !model.description.startsWith('Auto-discovered')) {
+                        descEl.textContent = model.description;
+                    } else {
+                        descEl.remove();
+                        // Expand preview container when no description
+                        const previewContainer = modelCard.querySelector('.model-preview-container');
+                        previewContainer.classList.add('expanded-preview');
+                    }
+                    
+                    const exploreBtn = modelCard.querySelector('.explore-model-btn');
+                    exploreBtn.href = `/explorer/${model.id}`;
+                    
+                    const manageBtn = modelCard.querySelector('.manage-model-btn');
+                    manageBtn.dataset.modelId = model.id;
+                    manageBtn.dataset.modelName = model.name;
+                    manageBtn.dataset.modelPath = model.path;
+                    
+                    // Add model preview placeholder
+                    const previewContainer = modelCard.querySelector('.model-preview-container');
+                    // Set data-model-id and data-model-path for later preview update
+                    previewContainer.dataset.modelId = model.id;
+                    previewContainer.dataset.modelPath = model.path;
+                    
+                    // Show preview_image directly if set
+                    if (model.preview_image) {
+                        const img = document.createElement('img');
+                        img.className = 'img-fluid preview-image';
+                        img.alt = model.name;
+                        img.src = `/api/v1/files/download?path=${encodeURIComponent(model.preview_image)}`;
+                        previewContainer.appendChild(img);
+                    } else {
+                        // Show a spinner until we find preview images
+                        previewContainer.innerHTML = `
+                            <div class="placeholder-spinner">
+                                <div class="spinner-border spinner-border-sm text-secondary" role="status">
+                                    <span class="visually-hidden">Loading preview...</span>
+                                </div>
+                            </div>`;
+                    }
+                    
+                    modelsContainer.appendChild(modelCard);
+                } else {
+                    const modelRow = modelRowTemplate.content.cloneNode(true);
+                    modelRow.querySelector('.model-name').textContent = model.name;
+                    modelRow.querySelector('.model-description').textContent = model.description || 'No description available';
+                    
+                    const exploreBtn = modelRow.querySelector('.explore-model-btn');
+                    exploreBtn.href = `/explorer/${model.id}`;
+                    
+                    const manageBtn = modelRow.querySelector('.manage-model-btn');
+                    manageBtn.dataset.modelId = model.id;
+                    manageBtn.dataset.modelName = model.name;
+                    manageBtn.dataset.modelPath = model.path;
+                    
+                    modelsContainer.appendChild(modelRow);
+                }
+            });
+            
+            // Setup manage buttons event listeners
+            document.querySelectorAll('.manage-model-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    openManageModelModal(this.dataset.modelId, this.dataset.modelName);
+                });
+            });
+
+            // Add mouse wheel zoom functionality for preview images
+            setupImageZoom();
+        }
         
         // Load models
         async function loadModels() {
@@ -643,6 +756,11 @@
         
         // Verify admin status on page load
         checkAdminStatus();
+
+        // Add event listener for search input
+        searchInput.addEventListener('input', (e) => {
+            filterModels(e.target.value);
+        });
     });
 
     // Toast notification function

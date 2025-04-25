@@ -9,13 +9,20 @@
         <p class="text-muted">Your accessible models <span class="badge bg-info" id="models-count">0 models</span></p>
     </div>
     <div class="col-md-6 text-end">
-        <div class="btn-group">
-            <button class="btn btn-outline-primary" id="refresh-button">
-                <i class="bi bi-arrow-clockwise"></i> Refresh
-            </button>
-            <button class="btn btn-outline-secondary" id="toggle-view-button" data-view="grid">
-                <i class="bi bi-list"></i> List View
-            </button>
+        <!-- Add search bar -->
+        <div class="d-flex justify-content-end gap-2">
+            <div class="input-group me-2" style="max-width: 300px;">
+                <span class="input-group-text"><i class="bi bi-search"></i></span>
+                <input type="text" class="form-control" id="model-search" placeholder="Search models...">
+            </div>
+            <div class="btn-group">
+                <button class="btn btn-outline-primary" id="refresh-button">
+                    <i class="bi bi-arrow-clockwise"></i> Refresh
+                </button>
+                <button class="btn btn-outline-secondary" id="toggle-view-button" data-view="grid">
+                    <i class="bi bi-list"></i> List View
+                </button>
+            </div>
         </div>
     </div>
 </div>
@@ -103,8 +110,10 @@
         const modelCardTemplate = document.getElementById('model-card-template');
         const modelRowTemplate = document.getElementById('model-row-template');
         const noModelsTemplate = document.getElementById('no-models-template');
+        const searchInput = document.getElementById('model-search');
         
         let currentView = 'grid'; // Default view is grid
+        let allModelsData = []; // Store all models data for filtering
         
         // Render models based on current view
         function renderModels(models) {
@@ -174,6 +183,23 @@
             });
         }
 
+        // Filter models based on search input
+        function filterModels(searchTerm) {
+            searchTerm = searchTerm.toLowerCase().trim();
+            
+            if (!searchTerm) {
+                renderModels(allModelsData);
+                return;
+            }
+            
+            const filteredModels = allModelsData.filter(model => 
+                model.name.toLowerCase().includes(searchTerm) || 
+                (model.description && model.description.toLowerCase().includes(searchTerm))
+            );
+            
+            renderModels(filteredModels);
+        }
+
         // Load models
         async function loadModels() {
             try {
@@ -185,11 +211,11 @@
                     throw new Error('Failed to load models');
                 }
                 
-                const allModels = await response.json();
-                renderModels(allModels);
+                allModelsData = await response.json();
+                renderModels(allModelsData);
                 
                 // Load media files with concurrency control
-                await loadModelMediaFiles(allModels);
+                await loadModelMediaFiles(allModelsData);
                 
             } catch (error) {
                 console.error('Error loading models:', error);
@@ -414,6 +440,11 @@
         // Initial load (this is from the existing code)
         // loadModels();
         checkUserRole();
+        
+        // Add event listener for search input
+        searchInput.addEventListener('input', (e) => {
+            filterModels(e.target.value);
+        });
     });
 </script>
 {% endblock %}

@@ -107,8 +107,8 @@ async def read_models(
     # Sync filesystem models into database
     await sync_discover_models(db)
     if current_user.is_admin:
-        # Admin users can see all models
-        result = await db.execute(select(Model).offset(skip).limit(limit))
+        # Admin users can see all models, now sorted alphabetically by name
+        result = await db.execute(select(Model).order_by(Model.name).offset(skip).limit(limit))
         models = result.scalars().all()
     else:
         # Regular users can only see models they have access to
@@ -117,7 +117,7 @@ async def read_models(
             Model.id == user_model_permissions.c.model_id
         ).where(
             user_model_permissions.c.user_id == current_user.id
-        ).offset(skip).limit(limit)
+        ).order_by(Model.name).offset(skip).limit(limit)  # Added ordering here
         
         result = await db.execute(query)
         models = result.scalars().all()

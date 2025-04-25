@@ -142,8 +142,17 @@
                     <p class="mt-2">Loading models...</p>
                 </div>
                 
-                <div id="model-permissions-list" class="d-none">
-                    <!-- Model permissions will be loaded here -->
+                <!-- Add search bar for models -->
+                <div class="input-group mb-3" id="model-search-container" style="display: none;">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="text" class="form-control" id="model-permissions-search" placeholder="Search models...">
+                </div>
+                
+                <!-- Add a scrollable container for the model permissions list -->
+                <div id="model-permissions-container" class="model-list-container" style="max-height: 60vh; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 0.25rem; display: none;">
+                    <div id="model-permissions-list" class="list-group list-group-flush">
+                        <!-- Model permissions will be loaded here -->
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -209,17 +218,88 @@ document.addEventListener('DOMContentLoaded', async function() {
     const permissionsUsername = document.getElementById('permissions-username');
     const permissionsUserId = document.getElementById('permissions-user-id');
     const permissionsLoading = document.getElementById('permissions-loading');
-    const modelPermissionsList = document.getElementById('model-permissions-list');
     const savePermissionsBtn = document.getElementById('save-permissions-btn');
+    const modelSearchContainer = document.getElementById('model-search-container');
+    const modelPermissionsSearch = document.getElementById('model-permissions-search');
+    const modelPermissionsContainer = document.getElementById('model-permissions-container');
     
-    // Delete User Modal
-    const deleteUsernameSpan = document.getElementById('delete-username');
-    const deleteUserIdInput = document.getElementById('delete-user-id');
-    const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
-    
-    // Store all models and user permissions
+    // Store all models and permission items for filtering
     let allModels = [];
     let userModelPermissions = {};
+    let modelPermissionsItems = [];
+    
+    // Filter model permissions based on search
+    function filterModelPermissions(searchTerm) {
+        searchTerm = searchTerm.toLowerCase().trim();
+        
+        for (const item of modelPermissionsItems) {
+            const modelName = item.textContent.trim();
+            if (!searchTerm || modelName.toLowerCase().includes(searchTerm)) {
+                item.style.display = '';
+            } else {
+                item.style.display = 'none';
+            }
+        }
+    }
+    
+    // Open model permissions modal
+    async function openModelPermissionsModal(userId, username) {
+        permissionsUsername.textContent = `Permissions for ${username}`;
+        permissionsUserId.value = userId;
+        
+        // Show loading state
+        permissionsLoading.classList.remove('d-none');
+        document.getElementById('model-permissions-container').style.display = 'none';
+        
+        // Load all models if not already loaded
+        if (allModels.length === 0) {
+            await loadAllModels();
+        }
+        
+        // Load user permissions for each model
+        await loadUserModelPermissions(userId);
+        
+        // Populate permissions list
+        if (allModels && allModels.length > 0) {
+            const container = document.getElementById('model-permissions-container');
+            const modelPermissionsList = document.getElementById('model-permissions-list');
+            modelPermissionsList.innerHTML = '';
+            modelPermissionsItems = [];
+            
+            allModels.forEach(model => {
+                const hasPermission = userModelPermissions[model.id] || false;
+                
+                const listItem = document.createElement('label');
+                listItem.className = 'list-group-item';
+                listItem.innerHTML = `
+                    <input class="form-check-input me-2 model-permission-checkbox" 
+                           type="checkbox" id="model-${model.id}" 
+                           data-model-id="${model.id}" ${hasPermission ? 'checked' : ''}>
+                    ${model.name}
+                `;
+                
+                modelPermissionsList.appendChild(listItem);
+                modelPermissionsItems.push(listItem);
+            });
+            
+            // Hide loading, show permissions list and search bar
+            permissionsLoading.classList.add('d-none');
+            container.style.display = 'block';
+            modelSearchContainer.style.display = 'block';
+        } else {
+            modelPermissionsList.innerHTML = '<p class="text-muted">No models found.</p>';
+            permissionsLoading.classList.add('d-none');
+            document.getElementById('model-permissions-list').classList.remove('d-none');
+        }
+    }
+    
+    // Add event listener for model permissions search
+    modelPermissionsSearch.addEventListener('input', (e) => {
+        filterModelPermissions(e.target.value);
+    });
+    
+    // Store all users
+    let allUsers = [];
     
     // Load all users
     async function loadUsers() {
@@ -319,7 +399,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Load all models
     async function loadAllModels() {
         try {
-            const response = await Auth.fetch('/api/v1/models/');
+            const response = await Auth.fetch('/api/v1/models?limit=10000');
             
             if (!response) {
                 console.error('No se pudo obtener una respuesta válida de la API');
@@ -373,49 +453,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
         
         return userModelPermissions;
-    }
-    
-    // Open model permissions modal
-    async function openModelPermissionsModal(userId, username) {
-        permissionsUsername.textContent = `Permissions for ${username}`;
-        permissionsUserId.value = userId;
-        
-        // Show loading state
-        permissionsLoading.classList.remove('d-none');
-        modelPermissionsList.classList.add('d-none');
-        modelPermissionsList.innerHTML = '';
-        
-        // Load all models if not already loaded
-        if (allModels.length === 0) {
-            await loadAllModels();
-        }
-        
-        // Load user permissions for each model
-        await loadUserModelPermissions(userId);
-        
-        // Populate permissions list
-        if (allModels && allModels.length > 0) {
-            allModels.forEach(model => {
-                const hasPermission = userModelPermissions[model.id] || false;
-                
-                modelPermissionsList.innerHTML += `
-                    <div class="form-check mb-2">
-                        <input class="form-check-input model-permission-checkbox" 
-                               type="checkbox" id="model-${model.id}" 
-                               data-model-id="${model.id}" ${hasPermission ? 'checked' : ''}>
-                        <label class="form-check-label" for="model-${model.id}">
-                            ${model.name}
-                        </label>
-                    </div>
-                `;
-            });
-        } else {
-            modelPermissionsList.innerHTML = '<p class="text-muted">No models found.</p>';
-        }
-        
-        // Hide loading, show permissions list
-        permissionsLoading.classList.add('d-none');
-        modelPermissionsList.classList.remove('d-none');
     }
     
     // Save model permissions
