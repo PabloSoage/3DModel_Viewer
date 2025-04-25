@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any, List, Dict
 import os
 import logging
 import asyncio
@@ -29,6 +29,7 @@ class ModelsCache:
     def __init__(self):
         self.admin_models = []  # Cache for admin users (all models)
         self.user_models = {}   # Cache per user ID
+        self.model_permissions = {}  # Cache for model permissions: {model_id: [user_ids]}
         self.last_sync = None   # When was the last sync performed
         self.syncing_lock = asyncio.Lock()  # Lock for concurrent sync operations
         self.sync_in_progress = False       # Flag for sync status
@@ -310,6 +311,17 @@ async def update_model_permission(
         )
         await db.execute(query)
         await db.commit()
+        
+        # Invalidate cache for this model
+        if permission_data.model_id in models_cache.model_permissions:
+            del models_cache.model_permissions[permission_data.model_id]
+            logger.info(f"Invalidated permissions cache for model {permission_data.model_id}")
+        
+        # Also invalidate user permissions cache
+        user_cache_key = f"user_{permission_data.user_id}_permissions"
+        if user_cache_key in models_cache.model_permissions:
+            del models_cache.model_permissions[user_cache_key]
+            logger.info(f"Invalidated permissions cache for user {permission_data.user_id}")
     
     return permission_data
 
@@ -344,6 +356,17 @@ async def delete_model_permission(
         )
         await db.execute(query)
         await db.commit()
+        
+        # Invalidate cache for this model
+        if permission_data.model_id in models_cache.model_permissions:
+            del models_cache.model_permissions[permission_data.model_id]
+            logger.info(f"Invalidated permissions cache for model {permission_data.model_id}")
+        
+        # Also invalidate user permissions cache
+        user_cache_key = f"user_{permission_data.user_id}_permissions"
+        if user_cache_key in models_cache.model_permissions:
+            del models_cache.model_permissions[user_cache_key]
+            logger.info(f"Invalidated permissions cache for user {permission_data.user_id}")
     else:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -358,11 +381,18 @@ async def read_model_permissions(
     model_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
+    force_refresh: bool = Query(False, description="Force refresh of permissions from database")
 ) -> Any:
     """
     Get all users with access to a specific model.
     Only admin users can view permissions.
+    Uses caching to avoid repeated database queries for the same model.
     """
+    # Check cache first if not forcing refresh
+    if not force_refresh and model_id in models_cache.model_permissions:
+        logger.info(f"Using cached permissions for model {model_id}")
+        return models_cache.model_permissions[model_id]
+    
     # Verify model exists
     result = await db.execute(select(Model).where(Model.id == model_id))
     model = result.scalars().first()
@@ -380,4 +410,72 @@ async def read_model_permissions(
     result = await db.execute(query)
     user_ids = [row[0] for row in result.fetchall()]
     
+    # Cache the permissions
+    models_cache.model_permissions[model_id] = user_ids
+    logger.info(f"Cached permissions for model {model_id}")
+    
     return user_ids
+
+# Add new endpoint to get all permissions for a user at once
+@router.get("/user-permissions/{user_id}", response_model=Dict[int, bool])
+async def read_user_model_permissions(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+    force_refresh: bool = Query(False, description="Force refresh of permissions from database")
+) -> Any:
+    """
+    Get all model permissions for a specific user.
+    Returns a dictionary mapping model_id -> boolean indicating if user has access.
+    Only admin users can view permissions.
+    Uses caching to avoid repeated database queries.
+    """
+    # Cache key for user permissions
+    cache_key = f"user_{user_id}_permissions"
+    
+    # Check cache first if not forcing refresh
+    if not force_refresh and cache_key in models_cache.model_permissions:
+        logger.info(f"Using cached permissions for user {user_id}")
+        return models_cache.model_permissions[cache_key]
+    
+    # Verify user exists
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalars().first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    
+    # Get all models
+    result = await db.execute(select(Model))
+    models = result.scalars().all()
+    
+    # Get all permissions for this user
+    query = select(user_model_permissions.c.model_id).where(
+        user_model_permissions.c.user_id == user_id
+    )
+    result = await db.execute(query)
+    permitted_model_ids = [row[0] for row in result.fetchall()]
+    
+    # Create a dictionary of model_id -> has_permission
+    permissions_dict = {model.id: (model.id in permitted_model_ids) for model in models}
+    
+    # Cache the permissions
+    models_cache.model_permissions[cache_key] = permissions_dict
+    logger.info(f"Cached all permissions for user {user_id}")
+    
+    return permissions_dict
+
+# Modify the existing clear-permissions-cache endpoint to also clear user permissions
+@router.post("/permissions/clear-cache", response_model=dict)
+async def clear_permissions_cache(
+    current_user: User = Depends(get_current_admin_user),
+) -> Any:
+    """
+    Clear the permissions cache.
+    Only admin users can clear the cache.
+    """
+    # Clear individual model permissions and user permissions
+    models_cache.model_permissions = {}
+    return {"status": "success", "message": "Permissions cache cleared"}

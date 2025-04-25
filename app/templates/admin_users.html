@@ -142,12 +142,15 @@
                     <p class="mt-2">Loading models...</p>
                 </div>
                 
-                <!-- Fix search bar styling -->
-                <div class="mb-3" id="model-search-container" style="display: none;">
+                <!-- Add refresh button in control bar -->
+                <div class="d-flex justify-content-between align-items-center mb-3" id="model-search-controls" style="display: none;">
                     <div class="input-group w-100">
                         <span class="input-group-text"><i class="bi bi-search"></i></span>
                         <input type="text" class="form-control" id="model-permissions-search" placeholder="Search models...">
                     </div>
+                    <button class="btn btn-outline-primary ms-2" id="refresh-permissions-btn" title="Refresh permissions">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
                 </div>
                 
                 <!-- Add a scrollable container for the model permissions list -->
@@ -221,9 +224,10 @@ document.addEventListener('DOMContentLoaded', async function() {
     const permissionsUserId = document.getElementById('permissions-user-id');
     const permissionsLoading = document.getElementById('permissions-loading');
     const savePermissionsBtn = document.getElementById('save-permissions-btn');
-    const modelSearchContainer = document.getElementById('model-search-container');
+    const modelSearchControls = document.getElementById('model-search-controls');
     const modelPermissionsSearch = document.getElementById('model-permissions-search');
     const modelPermissionsContainer = document.getElementById('model-permissions-container');
+    const refreshPermissionsBtn = document.getElementById('refresh-permissions-btn');
     
     // Delete User Modal - Add the missing reference
     const deleteUsernameSpan = document.getElementById('delete-username');
@@ -249,6 +253,43 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     }
     
+    // Load model permissions for a user - updated to use bulk endpoint
+    async function loadUserModelPermissions(userId, forceRefresh = false) {
+        userModelPermissions = {};
+        
+        try {
+            if (!allModels || allModels.length === 0) {
+                allModels = await loadAllModels();
+            }
+            
+            // Use the new bulk permissions endpoint instead of individual requests
+            const url = forceRefresh ? 
+                `/api/v1/models/user-permissions/${userId}?force_refresh=true` : 
+                `/api/v1/models/user-permissions/${userId}`;
+            
+            const response = await Auth.fetch(url);
+            
+            if (!response) {
+                console.error(`No se pudo obtener permisos para el usuario ${userId}`);
+                return userModelPermissions;
+            }
+            
+            if (!response.ok) {
+                console.error(`Error al obtener permisos para el usuario ${userId}: ${response.status}`);
+                return userModelPermissions;
+            }
+            
+            // Now we get a dictionary of model_id -> has_permission
+            userModelPermissions = await response.json();
+            console.log(`Loaded permissions for ${Object.keys(userModelPermissions).length} models in a single request`);
+            
+        } catch (error) {
+            console.error('Error loading model permissions:', error);
+        }
+        
+        return userModelPermissions;
+    }
+    
     // Open model permissions modal
     async function openModelPermissionsModal(userId, username) {
         permissionsUsername.textContent = `Permissions for ${username}`;
@@ -256,7 +297,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         // Show loading state
         permissionsLoading.classList.remove('d-none');
-        document.getElementById('model-permissions-container').style.display = 'none';
+        modelPermissionsContainer.style.display = 'none';
+        modelSearchControls.style.display = 'none';
         
         // Load all models if not already loaded
         if (allModels.length === 0) {
@@ -289,10 +331,10 @@ document.addEventListener('DOMContentLoaded', async function() {
                 modelPermissionsItems.push(listItem);
             });
             
-            // Hide loading, show permissions list and search bar
+            // Hide loading, show permissions list and search controls
             permissionsLoading.classList.add('d-none');
             container.style.display = 'block';
-            modelSearchContainer.style.display = 'block';
+            modelSearchControls.style.display = 'flex'; // Use flex to align items properly
         } else {
             modelPermissionsList.innerHTML = '<p class="text-muted">No models found.</p>';
             permissionsLoading.classList.add('d-none');
@@ -300,9 +342,54 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     }
     
-    // Add event listener for model permissions search
-    modelPermissionsSearch.addEventListener('input', (e) => {
-        filterModelPermissions(e.target.value);
+    // Refresh permissions handler
+    refreshPermissionsBtn.addEventListener('click', async () => {
+        const userId = permissionsUserId.value;
+        if (!userId) return;
+        
+        // Show loading state
+        permissionsLoading.classList.remove('d-none');
+        modelPermissionsContainer.style.display = 'none';
+        modelSearchControls.style.display = 'none';
+        
+        try {
+            // Clear server cache first
+            await Auth.fetch('/api/v1/models/permissions/clear-cache', { method: 'POST' });
+            
+            // Then reload permissions with force refresh - using bulk endpoint
+            await loadUserModelPermissions(userId, true);
+            
+            // Re-populate the permissions list
+            const modelPermissionsList = document.getElementById('model-permissions-list');
+            modelPermissionsList.innerHTML = '';
+            modelPermissionsItems = [];
+            
+            allModels.forEach(model => {
+                const hasPermission = userModelPermissions[model.id] || false;
+                
+                const listItem = document.createElement('label');
+                listItem.className = 'list-group-item';
+                listItem.innerHTML = `
+                    <input class="form-check-input me-2 model-permission-checkbox" 
+                           type="checkbox" id="model-${model.id}" 
+                           data-model-id="${model.id}" ${hasPermission ? 'checked' : ''}>
+                    ${model.name}
+                `;
+                
+                modelPermissionsList.appendChild(listItem);
+                modelPermissionsItems.push(listItem);
+            });
+            
+            showToast('Permissions refreshed successfully', 'success');
+        } catch (error) {
+            console.error('Error refreshing permissions:', error);
+            showToast('Error refreshing permissions', 'danger');
+        } finally {
+            // Hide loading, show controls and list regardless of outcome
+            permissionsLoading.classList.add('d-none');
+            modelPermissionsContainer.style.display = 'block';
+            modelSearchControls.style.display = 'flex';
+        }
     });
     
     // Store all users
@@ -423,43 +510,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             console.error('Error loading models:', error);
             return [];
         }
-    }
-    
-    // Load model permissions for a user
-    async function loadUserModelPermissions(userId) {
-        userModelPermissions = {};
-        
-        try {
-            if (!allModels || allModels.length === 0) {
-                allModels = await loadAllModels();
-            }
-            
-            // For each model, check if the user has permission
-            for (const model of allModels) {
-                const response = await Auth.fetch(`/api/v1/models/${model.id}/permissions`);
-                
-                if (!response) {
-                    console.error(`No se pudo obtener permisos para el modelo ${model.id}`);
-                    continue;
-                }
-                
-                // El resto del código permanece igual
-                if (!response.ok) {
-                    console.error(`Error al obtener permisos para el modelo ${model.id}: ${response.status}`);
-                    continue;
-                }
-                
-                const userIds = await response.json();
-                
-                // Check if this user has permission
-                userModelPermissions[model.id] = userIds.includes(Number(userId));
-            }
-            
-        } catch (error) {
-            console.error('Error loading model permissions:', error);
-        }
-        
-        return userModelPermissions;
     }
     
     // Save model permissions
