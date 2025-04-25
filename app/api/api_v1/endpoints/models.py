@@ -1,8 +1,11 @@
 from typing import Any, List
 import os
 import logging
+import asyncio
+import time
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status, Response
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
 from sqlalchemy.orm import joinedload
@@ -21,73 +24,119 @@ router = APIRouter()
 # Set up logger
 logger = logging.getLogger(__name__)
 
-async def sync_discover_models(db: AsyncSession):
+# In-memory cache for models - global singleton
+class ModelsCache:
+    def __init__(self):
+        self.admin_models = []  # Cache for admin users (all models)
+        self.user_models = {}   # Cache per user ID
+        self.last_sync = None   # When was the last sync performed
+        self.syncing_lock = asyncio.Lock()  # Lock for concurrent sync operations
+        self.sync_in_progress = False       # Flag for sync status
+
+# Create a global cache instance
+models_cache = ModelsCache()
+
+async def sync_discover_models(db: AsyncSession, force_refresh=False):
     """
     Ensure the models table matches subdirectories under MODELS_BASE_DIR.
     Only includes direct subdirectories of MODELS_BASE_DIR, not deeper ones.
+    Uses caching to avoid unnecessary file scans.
     """
-    # Fetch dynamic base directory from settings table
-    result = await db.execute(select(Setting).where(Setting.key == 'MODELS_BASE_DIR'))
-    setting = result.scalars().first()
-    base_dir = setting.value if setting and setting.value else settings.MODELS_BASE_DIR
+    # If sync is already in progress, wait for it to complete
+    if models_cache.sync_in_progress and not force_refresh:
+        logger.info("Another sync is in progress, waiting for it to complete")
+        async with models_cache.syncing_lock:
+            # By the time we acquire the lock, sync should be complete
+            logger.info("Using results from previous sync operation")
+            return
     
-    # Normalize base directory path with OS-appropriate separators
-    base_dir = os.path.normpath(base_dir)
-    logger.info(f"Syncing models from base directory: {base_dir}")
-    
-    # List current folders (direct subdirectories)
-    try:
-        dirs = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
-        logger.info(f"Found {len(dirs)} directories in base directory: {dirs}")
-    except Exception as e:
-        logger.error(f"Error listing directories: {e}")
-        return
-    
-    # Create a set of valid model paths (direct subdirectories only)
-    valid_paths = set()
-    for dir_name in dirs:
-        full_path = os.path.normpath(os.path.join(base_dir, dir_name))
-        valid_paths.add(full_path)
-    
-    # Fetch existing models
-    result = await db.execute(select(Model))
-    models = result.scalars().all()
-    logger.info(f"Found {len(models)} existing models in database")
-    logger.info(f"Valid direct subdirectory paths: {valid_paths}")
-    
-    # Debug: show all current model paths
-    for model in models:
-        norm_path = os.path.normpath(model.path)
-        logger.info(f"Existing model in DB: {model.name}, path: {norm_path}")
-        if norm_path not in valid_paths:
-            logger.info(f"Model {model.name} with path {norm_path} is NOT a valid direct subdirectory")
-        else:
-            logger.info(f"Model {model.name} with path {norm_path} is a valid direct subdirectory")
-    
-    # Add new models for any new folder
-    added_count = 0
-    for valid_path in valid_paths:
-        result = await db.execute(select(Model).where(Model.path == valid_path))
-        existing_model = result.scalars().first()
-        
-        if not existing_model:
-            name = os.path.basename(valid_path)
-            model = Model(name=name, path=valid_path, description=f"Auto-discovered: {name}")
-            db.add(model)
-            added_count += 1
-            logger.info(f"Adding new model: {name} at {valid_path}")
-    
-    # Remove models that are not in the valid_paths set
-    removed_count = 0
-    for model in models:
-        norm_path = os.path.normpath(model.path)
-        if norm_path not in valid_paths:
-            logger.info(f"REMOVING model: {model.name} at {norm_path} (not a direct subdirectory)")
-            await db.delete(model)
-            removed_count += 1
-    
-    await db.commit()
-    logger.info(f"Sync complete: Added {added_count} models, removed {removed_count} models")
+    async with models_cache.syncing_lock:
+        try:
+            # Only set if we actually acquired the lock
+            models_cache.sync_in_progress = True
+            
+            # Check if we need to refresh
+            current_time = time.time()
+            if models_cache.last_sync and not force_refresh:
+                # If cache is less than 5 minutes old, skip sync
+                if current_time - models_cache.last_sync < 300:  # 5 minutes
+                    logger.info("Using cached model data (less than 5 minutes old)")
+                    return
+            
+            # Fetch dynamic base directory from settings table
+            result = await db.execute(select(Setting).where(Setting.key == 'MODELS_BASE_DIR'))
+            setting = result.scalars().first()
+            base_dir = setting.value if setting and setting.value else settings.MODELS_BASE_DIR
+            
+            # Normalize base directory path with OS-appropriate separators
+            base_dir = os.path.normpath(base_dir)
+            logger.info(f"Syncing models from base directory: {base_dir}")
+            
+            # List current folders (direct subdirectories)
+            try:
+                dirs = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
+                logger.info(f"Found {len(dirs)} directories in base directory: {dirs}")
+            except Exception as e:
+                logger.error(f"Error listing directories: {e}")
+                return
+            
+            # Create a set of valid model paths (direct subdirectories only)
+            valid_paths = set()
+            for dir_name in dirs:
+                full_path = os.path.normpath(os.path.join(base_dir, dir_name))
+                valid_paths.add(full_path)
+            
+            # Fetch existing models
+            result = await db.execute(select(Model))
+            models = result.scalars().all()
+            logger.info(f"Found {len(models)} existing models in database")
+            logger.info(f"Valid direct subdirectory paths: {valid_paths}")
+            
+            # Debug: show all current model paths
+            for model in models:
+                norm_path = os.path.normpath(model.path)
+                logger.info(f"Existing model in DB: {model.name}, path: {norm_path}")
+                if norm_path not in valid_paths:
+                    logger.info(f"Model {model.name} with path {norm_path} is NOT a valid direct subdirectory")
+                else:
+                    logger.info(f"Model {model.name} with path {norm_path} is a valid direct subdirectory")
+            
+            # Add new models for any new folder
+            added_count = 0
+            for valid_path in valid_paths:
+                result = await db.execute(select(Model).where(Model.path == valid_path))
+                existing_model = result.scalars().first()
+                
+                if not existing_model:
+                    name = os.path.basename(valid_path)
+                    model = Model(name=name, path=valid_path, description=f"Auto-discovered: {name}")
+                    db.add(model)
+                    added_count += 1
+                    logger.info(f"Adding new model: {name} at {valid_path}")
+            
+            # Remove models that are not in the valid_paths set
+            removed_count = 0
+            for model in models:
+                norm_path = os.path.normpath(model.path)
+                if norm_path not in valid_paths:
+                    logger.info(f"REMOVING model: {model.name} at {norm_path} (not a direct subdirectory)")
+                    await db.delete(model)
+                    removed_count += 1
+            
+            await db.commit()
+            logger.info(f"Sync complete: Added {added_count} models, removed {removed_count} models")
+            
+            # If any changes were made, invalidate the cache
+            if added_count > 0 or removed_count > 0:
+                models_cache.admin_models = []
+                models_cache.user_models = {}
+            
+            # Update last sync time
+            models_cache.last_sync = time.time()
+            
+        finally:
+            # Always clear the sync flag when done
+            models_cache.sync_in_progress = False
 
 @router.get("/", response_model=List[ModelSchema])
 async def read_models(
@@ -96,6 +145,7 @@ async def read_models(
     skip: int = 0,
     limit: int = 100,
     current_user: User = Depends(get_current_active_user),
+    force_refresh: bool = Query(False, description="Force a refresh of models from disk")
 ) -> Any:
     """
     Retrieve models.
@@ -104,12 +154,31 @@ async def read_models(
     """
     # Prevent caching so updates to base dir are reflected immediately
     response.headers['Cache-Control'] = 'no-store'
-    # Sync filesystem models into database
-    await sync_discover_models(db)
+    
+    # Check if we should use cached data
+    if not force_refresh:
+        if current_user.is_admin and models_cache.admin_models:
+            logger.info("Using cached admin models")
+            # Return from cache, respecting pagination
+            models_subset = models_cache.admin_models[skip:skip+limit]
+            return models_subset
+        elif not current_user.is_admin and current_user.id in models_cache.user_models:
+            logger.info(f"Using cached models for user {current_user.id}")
+            # Return from cache, respecting pagination
+            models_subset = models_cache.user_models[current_user.id][skip:skip+limit]
+            return models_subset
+    
+    # Sync filesystem models into database if needed
+    await sync_discover_models(db, force_refresh=force_refresh)
+    
+    # Fetch and cache models
     if current_user.is_admin:
         # Admin users can see all models, now sorted alphabetically by name
-        result = await db.execute(select(Model).order_by(Model.name).offset(skip).limit(limit))
+        result = await db.execute(select(Model).order_by(Model.name))
         models = result.scalars().all()
+        # Cache all models for admin users
+        models_cache.admin_models = models
+        return models[skip:skip+limit]
     else:
         # Regular users can only see models they have access to
         query = select(Model).join(
@@ -117,12 +186,13 @@ async def read_models(
             Model.id == user_model_permissions.c.model_id
         ).where(
             user_model_permissions.c.user_id == current_user.id
-        ).order_by(Model.name).offset(skip).limit(limit)  # Added ordering here
+        ).order_by(Model.name)
         
         result = await db.execute(query)
         models = result.scalars().all()
-    
-    return models
+        # Cache models for this specific user
+        models_cache.user_models[current_user.id] = models
+        return models[skip:skip+limit]
 
 
 @router.get("/{model_id}", response_model=ModelSchema)

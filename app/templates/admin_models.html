@@ -150,6 +150,7 @@
         let currentView = 'grid'; // Default view is grid
         let allModels = [];
         let allUsers = [];
+        let loadInProgress = false; // Track if a load is in progress
         
         // Filter models based on search input
         function filterModels(searchTerm) {
@@ -257,9 +258,31 @@
         }
         
         // Load models
-        async function loadModels() {
+        async function loadModels(forceRefresh = false) {
+            // If a load is already in progress, don't start another one
+            if (loadInProgress) {
+                return;
+            }
+            
+            loadInProgress = true;
+            
             try {
-                const response = await Auth.fetch('/api/v1/models?limit=10000', {
+                // Show loading state
+                modelsContainer.innerHTML = `
+                    <div class="col-12 text-center py-5">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-muted">Loading models...</p>
+                    </div>
+                `;
+                
+                // Add forceRefresh parameter when requested
+                const url = forceRefresh ? 
+                    '/api/v1/models?limit=10000&force_refresh=true' : 
+                    '/api/v1/models?limit=10000';
+                
+                const response = await Auth.fetch(url, {
                     headers: {
                         'Authorization': `Bearer ${token}`
                     }
@@ -294,6 +317,9 @@
                         <button class="btn btn-primary" onclick="location.reload()">Try Again</button>
                     </div>
                 `;
+            } finally {
+                // Always reset the loading flag
+                loadInProgress = false;
             }
         }
 
@@ -554,9 +580,10 @@
             renderModels();
         });
 
-        // Refresh button
+        // Refresh button - now using force refresh parameter
         refreshButton.addEventListener('click', function() {
-            loadModels();
+            // Pass true to force refresh from filesystem
+            loadModels(true);
         });
 
         // Manage Model Modal functionality
@@ -728,8 +755,8 @@
         // Load users for admin
         loadUsers();
         
-        // Initial load
-        loadModels();
+        // Initial load - use cached models if available
+        loadModels(false);
         
         // Check user is admin
         async function checkAdminStatus() {

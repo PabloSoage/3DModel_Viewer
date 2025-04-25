@@ -114,6 +114,7 @@
         
         let currentView = 'grid'; // Default view is grid
         let allModelsData = []; // Store all models data for filtering
+        let loadInProgress = false; // Track if a load is in progress
         
         // Render models based on current view
         function renderModels(models) {
@@ -201,11 +202,33 @@
         }
 
         // Load models
-        async function loadModels() {
+        async function loadModels(forceRefresh = false) {
+            // If a load is already in progress, don't start another one
+            if (loadInProgress) {
+                return;
+            }
+            
+            loadInProgress = true;
+            
             try {
+                // Show loading state
+                modelsContainer.innerHTML = `
+                    <div class="col-12 text-center py-5">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-muted">Loading models...</p>
+                    </div>
+                `;
+                
                 // Use Auth.fetch instead of normal fetch to include the token automatically
                 // Add a much larger limit parameter to retrieve all models
-                const response = await Auth.fetch('/api/v1/models?limit=10000');
+                // Add forceRefresh parameter when requested
+                const url = forceRefresh ? 
+                    '/api/v1/models?limit=10000&force_refresh=true' : 
+                    '/api/v1/models?limit=10000';
+                
+                const response = await Auth.fetch(url);
                 
                 if (!response || !response.ok) {
                     throw new Error('Failed to load models');
@@ -222,8 +245,15 @@
                 showToast('Failed to load models: ' + error.message, 'danger');
                 modelsContainer.innerHTML = `
                     <div class="col-12 text-center py-5">
+                        <div class="alert alert-danger">
+                            <i class="bi bi-exclamation-triangle-fill"></i> Failed to load models: ${error.message}
+                        </div>
+                        <button class="btn btn-primary" onclick="location.reload()">Try Again</button>
                     </div>
                 `;
+            } finally {
+                // Always reset the loading flag
+                loadInProgress = false;
             }
         }
         
@@ -353,9 +383,10 @@
             loadModels();
         });
 
-        // Refresh button
+        // Refresh button - now using force refresh parameter
         refreshButton.addEventListener('click', function() {
-            loadModels();
+            // Pass true to force refresh from filesystem
+            loadModels(true);
         });
 
         // Check user role and add admin link if needed
@@ -433,7 +464,7 @@
         }
         
         // Setup image zoom after models are loaded
-        loadModels().then(() => {
+        loadModels(false).then(() => {
             setupImageZoom();
         });
         
