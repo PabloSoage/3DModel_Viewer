@@ -1,7 +1,7 @@
 from typing import Any, List
 import os
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
 from sqlalchemy.orm import joinedload
@@ -12,14 +12,43 @@ from app.core.auth import (
 )
 from app.db.init_db import get_db
 from app.core.config import settings
-from app.models.models import User, Model, user_model_permissions
+from app.models.models import User, Model, Setting, user_model_permissions
 from app.schemas.model import Model as ModelSchema, ModelPermission, ModelUpdate
 
 router = APIRouter()
 
+async def sync_discover_models(db: AsyncSession):
+    """
+    Ensure the models table matches subdirectories under MODELS_BASE_DIR.
+    """
+    # Fetch dynamic base directory from settings table
+    result = await db.execute(select(Setting).where(Setting.key == 'MODELS_BASE_DIR'))
+    setting = result.scalars().first()
+    base_dir = setting.value if setting and setting.value else settings.MODELS_BASE_DIR
+    # List current folders
+    try:
+        dirs = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
+    except Exception:
+        return
+    # Fetch existing models
+    result = await db.execute(select(Model))
+    models = result.scalars().all()
+    existing_paths = {m.path for m in models}
+    # Add new models for any new folder
+    for name in dirs:
+        full_path = os.path.join(base_dir, name)
+        if full_path not in existing_paths:
+            model = Model(name=name, path=full_path, description=f"Auto-discovered: {name}")
+            db.add(model)
+    # Remove models whose directory no longer exists (or outside base_dir)
+    for model in models:
+        if not os.path.isdir(model.path) or not model.path.startswith(base_dir):
+            await db.delete(model)
+    await db.commit()
 
 @router.get("/", response_model=List[ModelSchema])
 async def read_models(
+    response: Response,
     db: AsyncSession = Depends(get_db),
     skip: int = 0,
     limit: int = 100,
@@ -30,6 +59,10 @@ async def read_models(
     Only returns models that the current user has access to.
     Admin users can see all models.
     """
+    # Prevent caching so updates to base dir are reflected immediately
+    response.headers['Cache-Control'] = 'no-store'
+    # Sync filesystem models into database
+    await sync_discover_models(db)
     if current_user.is_admin:
         # Admin users can see all models
         result = await db.execute(select(Model).offset(skip).limit(limit))

@@ -33,6 +33,12 @@ async def update_setting(
         db.add(existing)
         await db.commit()
         await db.refresh(existing)
+        # If base directory changed, clear existing models so they will be re-synced
+        if key == 'MODELS_BASE_DIR':
+            from sqlalchemy import delete
+            from app.models.models import Model
+            await db.execute(delete(Model))
+            await db.commit()
         return existing
     new = Setting(key=setting.key, value=setting.value)
     db.add(new)
