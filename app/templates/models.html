@@ -372,14 +372,21 @@
         function handleImageZoom(e) {
             e.preventDefault(); // Prevent page scrolling
             
-            // Get current scale from transform or default to 1
-            let currentScale = 1;
+            // Get current scale from transform or default to the hover scale
+            let currentScale;
             const transform = e.target.style.transform;
+            
             if (transform) {
                 const match = transform.match(/scale\(([^)]+)\)/);
                 if (match && match[1]) {
                     currentScale = parseFloat(match[1]);
+                } else {
+                    // If transform exists but not in scale format, use hover scale
+                    currentScale = parseFloat(getComputedStyle(e.target.parentElement).getPropertyValue('--hover-scale') || 2.2);
                 }
+            } else {
+                // If no transform is set yet, use the hover scale
+                currentScale = parseFloat(getComputedStyle(e.target.parentElement).getPropertyValue('--hover-scale') || 2.2);
             }
             
             // Adjust scale based on wheel direction

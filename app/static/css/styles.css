@@ -95,8 +95,8 @@ body {
     justify-content: center;
     background-color: #f8f9fa;
     border-radius: 12px;
-    overflow: hidden;
-    padding: 8px;
+    --hover-scale: 2.2; /* Store the hover scale as a custom property */
+    overflow: visible !important;
 }
 
 .model-preview-container img {
@@ -112,8 +112,8 @@ body {
 /* Enlarge model preview on hover with improved quality - FIXED ZOOM */
 .model-preview-container img:hover {
     position: relative;
-    transform: scale(2.2);
-    transform-origin: center center; /* Ensure it zooms from the center */
+    transform: scale(var(--hover-scale));
+    transform-origin: center center;
     transition: transform 0.2s ease-in-out;
     z-index: 100; /* Higher z-index to ensure it shows above other elements */
     box-shadow: 0 5px 25px rgba(0,0,0,0.5); /* Stronger shadow effect */
@@ -127,11 +127,6 @@ body {
 /* Higher quality rendering for zoomed images */
 .preview-image {
     image-rendering: auto;
-}
-
-/* Enhanced zoom container to allow images to expand outside their container */
-.model-preview-container {
-    overflow: visible !important;
 }
 
 /* Placeholder styling */

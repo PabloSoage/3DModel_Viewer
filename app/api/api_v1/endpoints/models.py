@@ -1,5 +1,6 @@
 from typing import Any, List
 import os
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,34 +18,76 @@ from app.schemas.model import Model as ModelSchema, ModelPermission, ModelUpdate
 
 router = APIRouter()
 
+# Set up logger
+logger = logging.getLogger(__name__)
+
 async def sync_discover_models(db: AsyncSession):
     """
     Ensure the models table matches subdirectories under MODELS_BASE_DIR.
+    Only includes direct subdirectories of MODELS_BASE_DIR, not deeper ones.
     """
     # Fetch dynamic base directory from settings table
     result = await db.execute(select(Setting).where(Setting.key == 'MODELS_BASE_DIR'))
     setting = result.scalars().first()
     base_dir = setting.value if setting and setting.value else settings.MODELS_BASE_DIR
-    # List current folders
+    
+    # Normalize base directory path with OS-appropriate separators
+    base_dir = os.path.normpath(base_dir)
+    logger.info(f"Syncing models from base directory: {base_dir}")
+    
+    # List current folders (direct subdirectories)
     try:
         dirs = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
-    except Exception:
+        logger.info(f"Found {len(dirs)} directories in base directory: {dirs}")
+    except Exception as e:
+        logger.error(f"Error listing directories: {e}")
         return
+    
+    # Create a set of valid model paths (direct subdirectories only)
+    valid_paths = set()
+    for dir_name in dirs:
+        full_path = os.path.normpath(os.path.join(base_dir, dir_name))
+        valid_paths.add(full_path)
+    
     # Fetch existing models
     result = await db.execute(select(Model))
     models = result.scalars().all()
-    existing_paths = {m.path for m in models}
-    # Add new models for any new folder
-    for name in dirs:
-        full_path = os.path.join(base_dir, name)
-        if full_path not in existing_paths:
-            model = Model(name=name, path=full_path, description=f"Auto-discovered: {name}")
-            db.add(model)
-    # Remove models whose directory no longer exists (or outside base_dir)
+    logger.info(f"Found {len(models)} existing models in database")
+    logger.info(f"Valid direct subdirectory paths: {valid_paths}")
+    
+    # Debug: show all current model paths
     for model in models:
-        if not os.path.isdir(model.path) or not model.path.startswith(base_dir):
+        norm_path = os.path.normpath(model.path)
+        logger.info(f"Existing model in DB: {model.name}, path: {norm_path}")
+        if norm_path not in valid_paths:
+            logger.info(f"Model {model.name} with path {norm_path} is NOT a valid direct subdirectory")
+        else:
+            logger.info(f"Model {model.name} with path {norm_path} is a valid direct subdirectory")
+    
+    # Add new models for any new folder
+    added_count = 0
+    for valid_path in valid_paths:
+        result = await db.execute(select(Model).where(Model.path == valid_path))
+        existing_model = result.scalars().first()
+        
+        if not existing_model:
+            name = os.path.basename(valid_path)
+            model = Model(name=name, path=valid_path, description=f"Auto-discovered: {name}")
+            db.add(model)
+            added_count += 1
+            logger.info(f"Adding new model: {name} at {valid_path}")
+    
+    # Remove models that are not in the valid_paths set
+    removed_count = 0
+    for model in models:
+        norm_path = os.path.normpath(model.path)
+        if norm_path not in valid_paths:
+            logger.info(f"REMOVING model: {model.name} at {norm_path} (not a direct subdirectory)")
             await db.delete(model)
+            removed_count += 1
+    
     await db.commit()
+    logger.info(f"Sync complete: Added {added_count} models, removed {removed_count} models")
 
 @router.get("/", response_model=List[ModelSchema])
 async def read_models(

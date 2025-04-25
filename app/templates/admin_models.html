@@ -146,7 +146,7 @@
         // Load models
         async function loadModels() {
             try {
-                const response = await fetch('/api/v1/models', {
+                const response = await Auth.fetch('/api/v1/models', {
                     headers: {
                         'Authorization': `Bearer ${token}`
                     }
@@ -163,6 +163,9 @@
                 
                 allModels = await response.json();
                 renderModels();
+                
+                // Load media files with concurrency control once models are rendered
+                await loadModelMediaFiles(allModels);
             } catch (error) {
                 console.error('Error loading models:', error);
                 showToast('Failed to load models: ' + error.message, 'danger');
@@ -174,6 +177,120 @@
                         <button class="btn btn-primary" onclick="location.reload()">Try Again</button>
                     </div>
                 `;
+            }
+        }
+
+        // Load preview images for all models
+        async function loadModelMediaFiles(models) {
+            // Create a queue of models to process
+            const modelQueue = [...models];
+            
+            // Set maximum concurrent requests
+            const MAX_CONCURRENT = 5;
+            let activeRequests = 0;
+            let retryQueue = [];
+            
+            // Process the queue with limited concurrency
+            async function processQueue() {
+                if (modelQueue.length === 0 && retryQueue.length === 0) return;
+                
+                while ((modelQueue.length > 0 || retryQueue.length > 0) && activeRequests < MAX_CONCURRENT) {
+                    activeRequests++;
+                    
+                    // First process retry queue if it has items
+                    const model = retryQueue.length > 0 ? retryQueue.shift() : modelQueue.shift();
+                    if (!model) {
+                        activeRequests--;
+                        continue;
+                    }
+                    
+                    try {
+                        // Skip models that already have a preview_image
+                        if (model.preview_image) {
+                            // Update the UI with the preview image
+                            updateModelPreview(model.id, model.preview_image);
+                            activeRequests--;
+                            continue;
+                        }
+                        
+                        const cacheKey = `mediaFiles_${encodeURIComponent(model.path)}`;
+                        let mediaFiles;
+                        
+                        // Check for cached results first
+                        const cached = localStorage.getItem(cacheKey);
+                        if (cached) {
+                            try {
+                                mediaFiles = JSON.parse(cached);
+                            } catch (e) {
+                                // Invalid cache, we'll fetch again
+                            }
+                        }
+                        
+                        // If no cache or invalid cache, fetch from API
+                        if (!mediaFiles) {
+                            const response = await Auth.fetch(`/api/v1/explorer/media-files/?path=${encodeURIComponent(model.path)}`);
+                            
+                            if (response && response.ok) {
+                                mediaFiles = await response.json();
+                                try {
+                                    localStorage.setItem(cacheKey, JSON.stringify(mediaFiles));
+                                } catch (e) {
+                                    console.warn("Local storage quota exceeded, can't cache media files");
+                                }
+                            } else if (response && response.status === 429) {
+                                // Rate limited, add back to retry queue
+                                console.log(`Rate limited for ${model.name}, will retry`);
+                                retryQueue.push(model);
+                                await new Promise(r => setTimeout(r, 2000)); // Wait 2s before retry
+                                activeRequests--;
+                                continue;
+                            } else {
+                                throw new Error(`Failed to load media files for ${model.name}`);
+                            }
+                        }
+                        
+                        // Find the first image in media files to use as preview
+                        const previewImage = mediaFiles.find(file => 
+                            file.media_type && file.media_type.startsWith('image/'));
+                        
+                        if (previewImage) {
+                            // Update the UI with the preview image
+                            updateModelPreview(model.id, previewImage.path);
+                        }
+                        
+                    } catch (error) {
+                        console.error(`Error loading media for ${model.name}:`, error);
+                    } finally {
+                        activeRequests--;
+                        // Continue processing the queue
+                        processQueue();
+                    }
+                }
+            }
+            
+            // Start initial batch of requests
+            for (let i = 0; i < Math.min(MAX_CONCURRENT, modelQueue.length); i++) {
+                processQueue();
+            }
+            
+            // Wait for all requests to complete
+            while (activeRequests > 0 || modelQueue.length > 0 || retryQueue.length > 0) {
+                await new Promise(r => setTimeout(r, 100));
+            }
+        }
+        
+        // Update model preview with found image
+        function updateModelPreview(modelId, imagePath) {
+            const previewContainer = document.querySelector(`.model-preview-container[data-model-id="${modelId}"]`);
+            if (previewContainer) {
+                const img = document.createElement('img');
+                img.className = 'img-fluid preview-image';
+                img.alt = 'Model preview';
+                img.src = `/api/v1/files/download?path=${encodeURIComponent(imagePath)}`;
+                
+                // Replace loading spinner or placeholder with image
+                previewContainer.innerHTML = '';
+                previewContainer.appendChild(img);
             }
         }
 
@@ -190,7 +307,17 @@
                 if (currentView === 'grid') {
                     const modelCard = modelCardTemplate.content.cloneNode(true);
                     modelCard.querySelector('.model-name').textContent = model.name;
-                    modelCard.querySelector('.model-description').textContent = model.description || 'No description available';
+                    
+                    const descEl = modelCard.querySelector('.model-description'); 
+                    // Hide default auto-discovered descriptions
+                    if (model.description && !model.description.startsWith('Auto-discovered')) {
+                        descEl.textContent = model.description;
+                    } else {
+                        descEl.remove();
+                        // Expand preview container when no description
+                        const previewContainer = modelCard.querySelector('.model-preview-container');
+                        previewContainer.classList.add('expanded-preview');
+                    }
                     
                     const exploreBtn = modelCard.querySelector('.explore-model-btn');
                     exploreBtn.href = `/explorer/${model.id}`;
@@ -202,11 +329,26 @@
                     
                     // Add model preview placeholder
                     const previewContainer = modelCard.querySelector('.model-preview-container');
-                    previewContainer.innerHTML = `
-                        <div class="model-preview">
-                            <i class="bi bi-box display-1 text-muted"></i>
-                        </div>
-                    `;
+                    // Set data-model-id and data-model-path for later preview update
+                    previewContainer.dataset.modelId = model.id;
+                    previewContainer.dataset.modelPath = model.path;
+                    
+                    // Show preview_image directly if set
+                    if (model.preview_image) {
+                        const img = document.createElement('img');
+                        img.className = 'img-fluid preview-image';
+                        img.alt = model.name;
+                        img.src = `/api/v1/files/download?path=${encodeURIComponent(model.preview_image)}`;
+                        previewContainer.appendChild(img);
+                    } else {
+                        // Show a spinner until we find preview images
+                        previewContainer.innerHTML = `
+                            <div class="placeholder-spinner">
+                                <div class="spinner-border spinner-border-sm text-secondary" role="status">
+                                    <span class="visually-hidden">Loading preview...</span>
+                                </div>
+                            </div>`;
+                    }
                     
                     modelsContainer.appendChild(modelCard);
                 } else {
@@ -232,6 +374,53 @@
                     openManageModelModal(this.dataset.modelId, this.dataset.modelName);
                 });
             });
+
+            // Add mouse wheel zoom functionality for preview images
+            setupImageZoom();
+        }
+
+        // Add mouse wheel zoom functionality for preview images
+        function setupImageZoom() {
+            document.addEventListener('mouseover', function(e) {
+                // Check if target is a preview image
+                if (e.target.matches('.model-preview-container img')) {
+                    e.target.addEventListener('wheel', handleImageZoom);
+                }
+            });
+            
+            document.addEventListener('mouseout', function(e) {
+                // Remove wheel listener when mouse leaves image
+                if (e.target.matches('.model-preview-container img')) {
+                    e.target.removeEventListener('wheel', handleImageZoom);
+                    // Reset transform when mouse leaves
+                    e.target.style.transform = '';
+                }
+            });
+        }
+        
+        function handleImageZoom(e) {
+            e.preventDefault(); // Prevent page scrolling
+            
+            // Get current scale from transform or default to 1
+            let currentScale = 1;
+            const transform = e.target.style.transform;
+            if (transform) {
+                const match = transform.match(/scale\(([^)]+)\)/);
+                if (match && match[1]) {
+                    currentScale = parseFloat(match[1]);
+                }
+            }
+            
+            // Adjust scale based on wheel direction
+            const delta = e.deltaY > 0 ? -0.5 : 0.5;
+            let newScale = Math.max(1, Math.min(6, currentScale + delta));
+            
+            if (newScale <= 1) {
+                // Reset transform if scale becomes 1 or less
+                e.target.style.transform = '';
+            } else {
+                e.target.style.transform = `scale(${newScale})`;
+            }
         }
 
         // Toggle view between grid and list
@@ -263,7 +452,7 @@
         // Load all users for the admin
         async function loadUsers() {
             try {
-                const response = await fetch('/api/v1/users', {
+                const response = await Auth.fetch('/api/v1/users', {
                     headers: {
                         'Authorization': `Bearer ${token}`
                     }
@@ -304,7 +493,7 @@
             
             // Load model permissions
             try {
-                const response = await fetch(`/api/v1/models/${modelId}/permissions`, {
+                const response = await Auth.fetch(`/api/v1/models/${modelId}/permissions`, {
                     headers: {
                         'Authorization': `Bearer ${token}`
                     }
@@ -379,11 +568,10 @@
             try {
                 // Add permissions
                 for (const userId of toAdd) {
-                    await fetch('/api/v1/models/permissions', {
+                    await Auth.fetch('/api/v1/models/permissions', {
                         method: 'PUT',
                         headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${token}`
+                            'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
                             model_id: currentModelId,
@@ -394,11 +582,10 @@
                 
                 // Remove permissions
                 for (const userId of toRemove) {
-                    await fetch('/api/v1/models/permissions', {
+                    await Auth.fetch('/api/v1/models/permissions', {
                         method: 'DELETE',
                         headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${token}`
+                            'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
                             model_id: currentModelId,
@@ -430,11 +617,7 @@
         // Check user is admin
         async function checkAdminStatus() {
             try {
-                const response = await fetch('/api/v1/auth/me', {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
+                const response = await Auth.fetch('/api/v1/auth/me');
                 
                 if (!response.ok) {
                     throw new Error('Failed to verify admin status');

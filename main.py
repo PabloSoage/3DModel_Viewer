@@ -212,7 +212,33 @@ async def admin_settings_page(
 
 if __name__ == "__main__":
     import uvicorn
-    # Run the application with workers for parallel handling
-    uvicorn.run(
-        "main:app", host="0.0.0.0", port=8888, reload=False, workers=4
-    )
+    import platform
+    
+    # Keep workers=4 for all platforms
+    workers = 4
+    
+    # Configure platform-specific settings for uvicorn
+    if platform.system() == "Windows":
+        # On Windows, use uvicorn directly with multiple workers but configure correctly
+        logger.info(f"Running on Windows with {workers} workers")
+        # The host is specified per-worker instead of shared across workers
+        uvicorn.run(
+            "main:app", 
+            host="0.0.0.0", 
+            port=8888, 
+            reload=False,
+            workers=workers,
+            loop="asyncio",           # Use asyncio event loop explicitly
+            http="h11",               # Use standard library HTTP implementation instead of httptools
+            ws="none",                # Disable WebSockets since we don't use them
+        )
+    else:
+        # On Unix systems, use the default configuration
+        logger.info(f"Running on Unix-like system with {workers} workers")
+        uvicorn.run(
+            "main:app", 
+            host="0.0.0.0", 
+            port=8888, 
+            reload=False,
+            workers=workers
+        )
