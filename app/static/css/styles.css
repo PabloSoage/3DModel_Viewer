@@ -84,16 +84,65 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-}
-.model-preview-container.expanded-preview img {
-    max-height: 100%;
-    width: auto;
+    overflow: hidden;
 }
 
-/* Enlarge model preview on hover */
+.model-preview-container {
+    min-height: 100px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #f8f9fa;
+    border-radius: 12px;
+    overflow: hidden;
+    padding: 8px;
+}
+
+.model-preview-container img {
+    max-height: 100%;
+    max-width: 100%;
+    object-fit: contain;
+    transition: transform 0.3s ease;
+    border-radius: 10px;
+    /* Add some spacing to make rounded corners visible */
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.05);
+}
+
+/* Enlarge model preview on hover with improved quality - FIXED ZOOM */
 .model-preview-container img:hover {
-    transform: scale(1.6);
+    position: relative;
+    transform: scale(2.2);
+    transform-origin: center center; /* Ensure it zooms from the center */
     transition: transform 0.2s ease-in-out;
-    z-index: 5;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    z-index: 100; /* Higher z-index to ensure it shows above other elements */
+    box-shadow: 0 5px 25px rgba(0,0,0,0.5); /* Stronger shadow effect */
+    image-rendering: -webkit-optimize-contrast; /* Improve image quality in Chrome */
+    image-rendering: crisp-edges; /* Improve image quality in Firefox */
+    image-rendering: pixelated; /* Alternative rendering for some browsers */
+    backface-visibility: hidden; /* Reduce blurriness during transform */
+    cursor: zoom-in; /* Change cursor to indicate zoom functionality */
+}
+
+/* Higher quality rendering for zoomed images */
+.preview-image {
+    image-rendering: auto;
+}
+
+/* Enhanced zoom container to allow images to expand outside their container */
+.model-preview-container {
+    overflow: visible !important;
+}
+
+/* Placeholder styling */
+.placeholder-spinner {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #f8f9fa;
 }

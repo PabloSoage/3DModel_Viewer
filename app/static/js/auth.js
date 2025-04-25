@@ -255,16 +255,51 @@ const Auth = {
             console.warn(`No valid token available for ${url}`);
         }
         
-        const response = await fetch(url, options);
-        
-        // Si recibimos un 401, es probable que el token haya expirado
-        if (response.status === 401 && window.location.pathname !== '/login') {
-            console.error(`Unauthorized response from API: ${url}`);
-            this.removeToken();
-            window.location.href = '/login';
-            return null;
+        try {
+            const response = await fetch(url, options);
+            
+            // Only handle 401 for non-media requests to avoid token removal during bulk operations
+            if (response.status === 401) {
+                // Don't immediately redirect for media-files endpoint failures
+                // This could be just a concurrency issue
+                if (url.includes('/explorer/media-files/')) {
+                    console.warn(`Unauthorized for media files: ${url}`);
+                    return response; // Return the error response but don't remove token
+                }
+                
+                console.error(`Unauthorized response from API: ${url}`);
+                
+                // Check if we should retry auth validation before removing token
+                if (!url.includes('/auth/')) {
+                    try {
+                        // Attempt to validate the token to confirm it's actually invalid
+                        const validationResp = await fetch('/api/v1/auth/test-token', {
+                            headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        
+                        if (validationResp.ok) {
+                            // Token is actually valid, don't remove it
+                            console.log("Token validated successfully despite 401 error");
+                            return response;
+                        }
+                    } catch (e) {
+                        // Validation failed, continue with token removal
+                    }
+                }
+                
+                // Only now remove the token after confirming it's invalid
+                this.removeToken();
+                
+                if (window.location.pathname !== '/login') {
+                    window.location.href = '/login';
+                    return null;
+                }
+            }
+            
+            return response;
+        } catch (error) {
+            console.error(`Network error calling ${url}:`, error);
+            throw error;
         }
-        
-        return response;
     }
 };

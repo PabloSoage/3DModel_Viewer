@@ -3,6 +3,7 @@ import logging
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
+from sqlalchemy.exc import IntegrityError, OperationalError
 from typing import AsyncGenerator
 
 from app.core.config import settings
@@ -41,9 +42,18 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 # Initialize database with admin user and default models
 async def init_db() -> None:
     try:
-        # Create tables
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        # Create tables - handle case where tables already exist
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+        except OperationalError as e:
+            if "already exists" in str(e):
+                # Tables already created by another worker, which is fine
+                logging.info("Tables already exist (created by another worker)")
+            else:
+                # This is an actual error we should raise
+                logging.error(f"Error creating tables: {str(e)}")
+                raise
 
         # Seed default admin user only on first initialization
         async with AsyncSessionLocal() as db:
@@ -51,6 +61,7 @@ async def init_db() -> None:
             # Count existing users
             result = await db.execute(select(func.count(User.id)))
             user_count = result.scalar_one()
+            
             # Determine admin_user
             if user_count == 0:
                 admin_user = User(
@@ -61,37 +72,62 @@ async def init_db() -> None:
                     is_admin=True
                 )
                 db.add(admin_user)
-                await db.commit()
-                await db.refresh(admin_user)
-                logging.info("Created default admin user")
+                try:
+                    await db.commit()
+                    await db.refresh(admin_user)
+                    logging.info("Created default admin user")
+                except IntegrityError:
+                    # Another worker likely created the admin user already
+                    await db.rollback()
+                    logging.info("Admin user already exists (created by another worker), skipping creation")
+                    # Fetch the existing admin user
+                    result = await db.execute(select(User).where(User.username == "admin"))
+                    admin_user = result.scalars().first()
             else:
                 # Fetch existing admin user if present
                 result = await db.execute(select(User).where(User.username == "admin"))
                 admin_user = result.scalars().first()
 
-            # Seed application settings with defaults
+            # Seed application settings with defaults - handle each setting in separate transaction
             from sqlalchemy import select as select_setting
             from app.models.models import Setting
             default_settings = {
                 'MODELS_BASE_DIR': str(settings.MODELS_BASE_DIR),
                 'STL_PREVIEW_DIR': str(settings.STL_PREVIEW_DIR),
             }
+            
+            # Process each setting individually to handle race conditions
             for key, val in default_settings.items():
-                result = await db.execute(select_setting(Setting).where(Setting.key == key))
-                existing = result.scalars().first()
-                if not existing:
-                    new_setting = Setting(key=key, value=val)
-                    db.add(new_setting)
-                    logging.info(f"Seeded config setting: {key}")
-            await db.commit()
+                try:
+                    # Start a fresh transaction for each setting
+                    result = await db.execute(select_setting(Setting).where(Setting.key == key))
+                    existing = result.scalars().first()
+                    if not existing:
+                        new_setting = Setting(key=key, value=val)
+                        db.add(new_setting)
+                        try:
+                            await db.commit()
+                            logging.info(f"Seeded config setting: {key}")
+                        except IntegrityError:
+                            # Another worker added this setting already
+                            await db.rollback()
+                            logging.info(f"Setting {key} already exists (added by another worker), skipping")
+                except Exception as e:
+                    logging.error(f"Error adding setting {key}: {str(e)}")
+                    await db.rollback()
+                    # Continue with other settings
 
-            # Ensure 'preview_image' column exists on existing DB
-            from sqlalchemy import text
-            pragma = await db.execute(text("PRAGMA table_info(models)"))
-            cols = [row[1] for row in pragma.fetchall()]
-            if 'preview_image' not in cols:
-                await db.execute(text('ALTER TABLE models ADD COLUMN preview_image TEXT'))
-                await db.commit()
+            # Ensure 'preview_image' column exists on existing DB - in separate transaction
+            try:
+                from sqlalchemy import text
+                pragma = await db.execute(text("PRAGMA table_info(models)"))
+                cols = [row[1] for row in pragma.fetchall()]
+                if 'preview_image' not in cols:
+                    await db.execute(text('ALTER TABLE models ADD COLUMN preview_image TEXT'))
+                    await db.commit()
+            except Exception as e:
+                logging.error(f"Error adding preview_image column: {str(e)}")
+                await db.rollback()  # Rollback on error
             
             # NOTE: Preview_image population skipped synchronously to speed startup; handled in background
     except Exception as e:
