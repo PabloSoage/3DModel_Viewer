@@ -142,10 +142,12 @@
                     <p class="mt-2">Loading models...</p>
                 </div>
                 
-                <!-- Add search bar for models -->
-                <div class="input-group mb-3" id="model-search-container" style="display: none;">
-                    <span class="input-group-text"><i class="bi bi-search"></i></span>
-                    <input type="text" class="form-control" id="model-permissions-search" placeholder="Search models...">
+                <!-- Fix search bar styling -->
+                <div class="mb-3" id="model-search-container" style="display: none;">
+                    <div class="input-group w-100">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" id="model-permissions-search" placeholder="Search models...">
+                    </div>
                 </div>
                 
                 <!-- Add a scrollable container for the model permissions list -->
@@ -223,6 +225,11 @@ document.addEventListener('DOMContentLoaded', async function() {
     const modelPermissionsSearch = document.getElementById('model-permissions-search');
     const modelPermissionsContainer = document.getElementById('model-permissions-container');
     
+    // Delete User Modal - Add the missing reference
+    const deleteUsernameSpan = document.getElementById('delete-username');
+    const deleteUserIdInput = document.getElementById('delete-user-id');
+    const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
+
     // Store all models and permission items for filtering
     let allModels = [];
     let userModelPermissions = {};
