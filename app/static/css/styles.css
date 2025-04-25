@@ -141,3 +141,49 @@ body {
     justify-content: center;
     background-color: #f8f9fa;
 }
+
+/* File Browser modal styles */
+.file-list-container {
+    max-height: 60vh; /* 60% of viewport height */
+    overflow-y: auto;
+    border: 1px solid #dee2e6;
+    border-radius: 0.25rem;
+    position: relative;
+}
+
+.file-list-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.file-list-container::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+.file-list-container::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 3px;
+}
+
+.file-list-container::-webkit-scrollbar-thumb:hover {
+    background: #a8a8a8;
+}
+
+.file-list-container .list-group-item {
+    border-left: none;
+    border-right: none;
+    cursor: pointer;
+    padding: 0.6rem 1rem;
+    transition: background-color 0.2s;
+}
+
+.file-list-container .list-group-item:hover {
+    background-color: #f8f9fa;
+}
+
+.file-list-container .list-group-item:first-child {
+    border-top: none;
+}
+
+.file-list-container .list-group-item:last-child {
+    border-bottom: none;
+}

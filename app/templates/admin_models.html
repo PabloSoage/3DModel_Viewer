@@ -6,7 +6,7 @@
 <div class="row mb-4">
     <div class="col-md-6">
         <h1 class="mb-0">3D Models Management</h1>
-        <p class="text-muted">Admin interface</p>
+        <p class="text-muted">Admin interface <span class="badge bg-info" id="models-count">0 models</span></p>
     </div>
     <div class="col-md-6 text-end">
         <div class="btn-group">
@@ -146,7 +146,7 @@
         // Load models
         async function loadModels() {
             try {
-                const response = await Auth.fetch('/api/v1/models', {
+                const response = await Auth.fetch('/api/v1/models?limit=10000', {
                     headers: {
                         'Authorization': `Bearer ${token}`
                     }
@@ -162,6 +162,10 @@
                 }
                 
                 allModels = await response.json();
+                
+                // Update model count badge
+                document.getElementById('models-count').textContent = `${allModels.length} models`;
+                
                 renderModels();
                 
                 // Load media files with concurrency control once models are rendered

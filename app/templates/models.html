@@ -6,6 +6,7 @@
 <div class="row mb-4">
     <div class="col-md-6">
         <h1 class="mb-0">3D Models</h1>
+        <p class="text-muted">Your accessible models <span class="badge bg-info" id="models-count">0 models</span></p>
     </div>
     <div class="col-md-6 text-end">
         <div class="btn-group">
@@ -109,6 +110,9 @@
         function renderModels(models) {
             modelsContainer.innerHTML = '';
             
+            // Update model count badge
+            document.getElementById('models-count').textContent = `${models.length} models`;
+            
             if (!models.length) {
                 modelsContainer.appendChild(noModelsTemplate.content.cloneNode(true));
                 return;
@@ -174,7 +178,8 @@
         async function loadModels() {
             try {
                 // Use Auth.fetch instead of normal fetch to include the token automatically
-                const response = await Auth.fetch('/api/v1/models');
+                // Add a much larger limit parameter to retrieve all models
+                const response = await Auth.fetch('/api/v1/models?limit=10000');
                 
                 if (!response || !response.ok) {
                     throw new Error('Failed to load models');

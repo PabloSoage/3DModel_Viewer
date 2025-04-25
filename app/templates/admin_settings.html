@@ -33,7 +33,10 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
-        <ul class="list-group" id="file-list"></ul>
+        <!-- Add a scrollable container around the list -->
+        <div class="file-list-container" style="max-height: 60vh; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 0.25rem;">
+          <ul class="list-group list-group-flush" id="file-list"></ul>
+        </div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
