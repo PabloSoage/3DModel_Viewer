@@ -153,6 +153,15 @@
                     </button>
                 </div>
                 
+                <!-- Add "Select All" control above the model permissions list -->
+                <div class="d-flex justify-content-between align-items-center mb-2" id="select-all-container" style="display: none;">
+                    <label class="form-check form-check-inline m-0">
+                        <input class="form-check-input" type="checkbox" id="select-all-models">
+                        <span class="form-check-label fw-bold">Select All / Deselect All</span>
+                    </label>
+                    <span class="badge bg-primary" id="selected-count">0 selected</span>
+                </div>
+                
                 <!-- Add a scrollable container for the model permissions list -->
                 <div id="model-permissions-container" class="model-list-container" style="max-height: 60vh; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 0.25rem; display: none;">
                     <div id="model-permissions-list" class="list-group list-group-flush">
@@ -229,7 +238,12 @@ document.addEventListener('DOMContentLoaded', async function() {
     const modelPermissionsContainer = document.getElementById('model-permissions-container');
     const refreshPermissionsBtn = document.getElementById('refresh-permissions-btn');
     
-    // Delete User Modal - Add the missing reference
+    // Select All elements
+    const selectAllCheckbox = document.getElementById('select-all-models');
+    const selectAllContainer = document.getElementById('select-all-container');
+    const selectedCountBadge = document.getElementById('selected-count');
+    
+    // Delete User Modal
     const deleteUsernameSpan = document.getElementById('delete-username');
     const deleteUserIdInput = document.getElementById('delete-user-id');
     const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
@@ -251,6 +265,9 @@ document.addEventListener('DOMContentLoaded', async function() {
                 item.style.display = 'none';
             }
         }
+        
+        // Update Select All checkbox state after filtering
+        updateSelectedCount();
     }
     
     // Load model permissions for a user - updated to use bulk endpoint
@@ -299,6 +316,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         permissionsLoading.classList.remove('d-none');
         modelPermissionsContainer.style.display = 'none';
         modelSearchControls.style.display = 'none';
+        selectAllContainer.style.display = 'none';
         
         // Load all models if not already loaded
         if (allModels.length === 0) {
@@ -335,12 +353,59 @@ document.addEventListener('DOMContentLoaded', async function() {
             permissionsLoading.classList.add('d-none');
             container.style.display = 'block';
             modelSearchControls.style.display = 'flex'; // Use flex to align items properly
+            selectAllContainer.style.display = 'flex';
+            
+            // Initialize the selected count and Select All checkbox state
+            updateSelectedCount();
         } else {
             modelPermissionsList.innerHTML = '<p class="text-muted">No models found.</p>';
             permissionsLoading.classList.add('d-none');
-            document.getElementById('model-permissions-list').classList.remove('d-none');
         }
     }
+    
+    // Select All / Deselect All functionality
+    selectAllCheckbox.addEventListener('change', function() {
+        const isChecked = this.checked;
+        // Get all visible checkboxes
+        const visibleCheckboxes = Array.from(document.querySelectorAll('.model-permission-checkbox'))
+            .filter(cb => cb.closest('.list-group-item').style.display !== 'none');
+        
+        // Set all visible checkboxes to the same state as the Select All checkbox
+        visibleCheckboxes.forEach(checkbox => {
+            checkbox.checked = isChecked;
+        });
+        
+        // Update selected count
+        updateSelectedCount();
+    });
+    
+    // Update the selected count badge
+    function updateSelectedCount() {
+        // Count all checked checkboxes
+        const checkedCount = document.querySelectorAll('.model-permission-checkbox:checked').length;
+        const totalCount = document.querySelectorAll('.model-permission-checkbox').length;
+        
+        // Update the badge text
+        selectedCountBadge.textContent = `${checkedCount} of ${totalCount} selected`;
+        
+        // Update Select All checkbox state based on whether all visible checkboxes are checked
+        const visibleCheckboxes = Array.from(document.querySelectorAll('.model-permission-checkbox'))
+            .filter(cb => cb.closest('.list-group-item').style.display !== 'none');
+        
+        const allVisibleChecked = visibleCheckboxes.every(cb => cb.checked);
+        const noneVisibleChecked = visibleCheckboxes.every(cb => !cb.checked);
+        
+        // Set the indeterminate state if some but not all are checked
+        selectAllCheckbox.indeterminate = !allVisibleChecked && !noneVisibleChecked;
+        selectAllCheckbox.checked = allVisibleChecked;
+    }
+    
+    // Add event listener for model permission checkboxes to update Select All state
+    document.addEventListener('change', function(e) {
+        if (e.target.classList.contains('model-permission-checkbox')) {
+            updateSelectedCount();
+        }
+    });
     
     // Refresh permissions handler
     refreshPermissionsBtn.addEventListener('click', async () => {
@@ -351,6 +416,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         permissionsLoading.classList.remove('d-none');
         modelPermissionsContainer.style.display = 'none';
         modelSearchControls.style.display = 'none';
+        selectAllContainer.style.display = 'none';
         
         try {
             // Clear server cache first
@@ -389,6 +455,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             permissionsLoading.classList.add('d-none');
             modelPermissionsContainer.style.display = 'block';
             modelSearchControls.style.display = 'flex';
+            selectAllContainer.style.display = 'flex';
         }
     });
     
