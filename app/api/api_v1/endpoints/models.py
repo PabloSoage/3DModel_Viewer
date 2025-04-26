@@ -271,97 +271,104 @@ async def sync_discover_models(db: AsyncSession, force_refresh=False):
             logger.info(f"Using results from previous sync operation in process {os.getpid()}")
             return
     
-    async with models_cache.syncing_lock:
-        try:
-            # Only set if we actually acquired the lock
-            models_cache.sync_in_progress = True
-            logger.info(f"Starting model directory synchronization in process {os.getpid()}")
-            
-            # Check if we need to refresh
-            current_time = time.time()
-            if models_cache.last_sync and not force_refresh:
-                # If cache is less than 30 minutes old, skip sync (was 5 minutes before)
-                if current_time - models_cache.last_sync < 1800:  # 30 minutes
-                    logger.info("Using cached model data (less than 30 minutes old)")
-                    return
-            
-            # Fetch dynamic base directory from settings table
-            result = await db.execute(select(Setting).where(Setting.key == 'MODELS_BASE_DIR'))
-            setting = result.scalars().first()
-            base_dir = setting.value if setting and setting.value else settings.MODELS_BASE_DIR
-            
-            # Normalize base directory path with OS-appropriate separators
-            base_dir = os.path.normpath(base_dir)
-            logger.info(f"Syncing models from base directory: {base_dir}")
-            
-            # List current folders (direct subdirectories)
+    # Set flag before acquiring lock to prevent recursive calls
+    # This helps prevent the double execution issue
+    models_cache.sync_in_progress = True
+    
+    try:
+        async with models_cache.syncing_lock:
             try:
-                dirs = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
-                logger.info(f"Found {len(dirs)} directories in base directory: {dirs}")
-            except Exception as e:
-                logger.error(f"Error listing directories: {e}")
-                return
-            
-            # Create a set of valid model paths (direct subdirectories only)
-            valid_paths = set()
-            for dir_name in dirs:
-                full_path = os.path.normpath(os.path.join(base_dir, dir_name))
-                valid_paths.add(full_path)
-            
-            # Fetch existing models
-            result = await db.execute(select(Model))
-            models = result.scalars().all()
-            logger.info(f"Found {len(models)} existing models in database")
-            logger.info(f"Valid direct subdirectory paths: {valid_paths}")
-            
-            # Debug: show all current model paths
-            for model in models:
-                norm_path = os.path.normpath(model.path)
-                logger.info(f"Existing model in DB: {model.name}, path: {norm_path}")
-                if norm_path not in valid_paths:
-                    logger.info(f"Model {model.name} with path {norm_path} is NOT a valid direct subdirectory")
-                else:
-                    logger.info(f"Model {model.name} with path {norm_path} is a valid direct subdirectory")
-            
-            # Add new models for any new folder
-            added_count = 0
-            for valid_path in valid_paths:
-                result = await db.execute(select(Model).where(Model.path == valid_path))
-                existing_model = result.scalars().first()
+                logger.info(f"Starting model directory synchronization in process {os.getpid()}")
                 
-                if not existing_model:
-                    name = os.path.basename(valid_path)
-                    model = Model(name=name, path=valid_path, description=f"Auto-discovered: {name}")
-                    db.add(model)
-                    added_count += 1
-                    logger.info(f"Adding new model: {name} at {valid_path}")
-            
-            # Remove models that are not in the valid_paths set
-            removed_count = 0
-            for model in models:
-                norm_path = os.path.normpath(model.path)
-                if norm_path not in valid_paths:
-                    logger.info(f"REMOVING model: {model.name} at {norm_path} (not a direct subdirectory)")
-                    await db.delete(model)
-                    removed_count += 1
-            
-            await db.commit()
-            logger.info(f"Sync complete: Added {added_count} models, removed {removed_count} models")
-            
-            # If any changes were made, invalidate the cache
-            if added_count > 0 or removed_count > 0:
-                logger.info(f"Cache invalidated due to changes: {added_count} added, {removed_count} removed in process {os.getpid()}")
-                models_cache.clear()  # Use the new clear method
-            else:
-                logger.info(f"No changes to models, cache remains valid in process {os.getpid()}")
-            
-            # Update last sync time
-            models_cache.last_sync = time.time()
-            
-        finally:
-            # Always clear the sync flag when done
-            models_cache.sync_in_progress = False
-            logger.info(f"Model synchronization completed in process {os.getpid()}")
+                # Check if we need to refresh
+                current_time = time.time()
+                if models_cache.last_sync and not force_refresh:
+                    # If cache is less than 30 minutes old, skip sync (was 5 minutes before)
+                    if current_time - models_cache.last_sync < 1800:  # 30 minutes
+                        logger.info("Using cached model data (less than 30 minutes old)")
+                        return
+                
+                # Fetch dynamic base directory from settings table
+                result = await db.execute(select(Setting).where(Setting.key == 'MODELS_BASE_DIR'))
+                setting = result.scalars().first()
+                base_dir = setting.value if setting and setting.value else settings.MODELS_BASE_DIR
+                
+                # Normalize base directory path with OS-appropriate separators
+                base_dir = os.path.normpath(base_dir)
+                logger.info(f"Syncing models from base directory: {base_dir}")
+                
+                # List current folders (direct subdirectories)
+                try:
+                    dirs = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
+                    logger.info(f"Found {len(dirs)} directories in base directory: {dirs}")
+                except Exception as e:
+                    logger.error(f"Error listing directories: {e}")
+                    return
+                
+                # Create a set of valid model paths (direct subdirectories only)
+                valid_paths = set()
+                for dir_name in dirs:
+                    full_path = os.path.normpath(os.path.join(base_dir, dir_name))
+                    valid_paths.add(full_path)
+                
+                # Fetch existing models
+                result = await db.execute(select(Model))
+                models = result.scalars().all()
+                logger.info(f"Found {len(models)} existing models in database")
+                logger.info(f"Valid direct subdirectory paths: {valid_paths}")
+                
+                # Debug: show all current model paths
+                for model in models:
+                    norm_path = os.path.normpath(model.path)
+                    logger.info(f"Existing model in DB: {model.name}, path: {norm_path}")
+                    if norm_path not in valid_paths:
+                        logger.info(f"Model {model.name} with path {norm_path} is NOT a valid direct subdirectory")
+                    else:
+                        logger.info(f"Model {model.name} with path {norm_path} is a valid direct subdirectory")
+                
+                # Add new models for any new folder
+                added_count = 0
+                for valid_path in valid_paths:
+                    result = await db.execute(select(Model).where(Model.path == valid_path))
+                    existing_model = result.scalars().first()
+                    
+                    if not existing_model:
+                        name = os.path.basename(valid_path)
+                        model = Model(name=name, path=valid_path, description=f"Auto-discovered: {name}")
+                        db.add(model)
+                        added_count += 1
+                        logger.info(f"Adding new model: {name} at {valid_path}")
+                
+                # Remove models that are not in the valid_paths set
+                removed_count = 0
+                for model in models:
+                    norm_path = os.path.normpath(model.path)
+                    if norm_path not in valid_paths:
+                        logger.info(f"REMOVING model: {model.name} at {norm_path} (not a direct subdirectory)")
+                        await db.delete(model)
+                        removed_count += 1
+                
+                await db.commit()
+                logger.info(f"Sync complete: Added {added_count} models, removed {removed_count} models")
+                
+                # If any changes were made, invalidate the cache
+                if added_count > 0 or removed_count > 0:
+                    logger.info(f"Cache invalidated due to changes: {added_count} added, {removed_count} removed in process {os.getpid()}")
+                    models_cache.clear()  # Use the new clear method
+                else:
+                    logger.info(f"No changes to models, cache remains valid in process {os.getpid()}")
+                
+                # Update last sync time
+                models_cache.last_sync = time.time()
+                
+            finally:
+                # We don't set sync_in_progress to False here anymore
+                # It will be set in the outer finally block
+                pass
+    finally:
+        # Always clear the sync flag when done, no matter what happened
+        models_cache.sync_in_progress = False
+        logger.info(f"Model synchronization completed in process {os.getpid()}")
 
 @router.get("/", response_model=List[ModelSchema])
 async def read_models(
@@ -423,8 +430,11 @@ async def read_models(
     else:
         logger.info(f"Force refresh requested in process {pid}, bypassing cache")
     
-    # Sync filesystem models into database if needed
-    await sync_discover_models(db, force_refresh=force_refresh)
+    # For non-admin users, we don't need to sync discovery - just get their permitted models
+    # Only do the full sync for admin users or if force_refresh is true
+    if current_user.is_admin or force_refresh:
+        # Sync filesystem models into database if needed
+        await sync_discover_models(db, force_refresh=force_refresh)
     
     # Fetch and cache models
     if current_user.is_admin:
@@ -445,7 +455,7 @@ async def read_models(
         ).order_by(Model.name)
         
         result = await db.execute(query)
-        models = result.scalars().all()
+        models = list(result.scalars().all())  # Ensure it's a proper list
         # Cache models for this specific user
         models_cache.user_models[current_user.id] = models
         logger.info(f"User {current_user.id} models fetched and cached: {len(models)} models")
@@ -519,7 +529,10 @@ async def update_model(
     return model
 
 
-@router.put("/permissions", response_model=ModelPermission)
+# We need to change the permission endpoints to have distinct paths
+
+# Update endpoint for adding permissions - Change from "/permissions" to "/permission/add"
+@router.put("/permission/add", response_model=ModelPermission)
 async def update_model_permission(
     permission_data: ModelPermission,
     db: AsyncSession = Depends(get_db),
@@ -578,11 +591,17 @@ async def update_model_permission(
         if user_cache_key in models_cache.model_permissions:
             del models_cache.model_permissions[user_cache_key]
             logger.info(f"Invalidated permissions cache for user {permission_data.user_id}")
+            
+        # Most importantly, invalidate the user's cached models list
+        if permission_data.user_id in models_cache.user_models:
+            del models_cache.user_models[permission_data.user_id]
+            logger.info(f"Cleared user {permission_data.user_id} models cache after permission addition")
     
     return permission_data
 
 
-@router.delete("/permissions", response_model=ModelPermission)
+# Update endpoint for removing permissions - Change from "/permissions" to "/permission/remove"
+@router.delete("/permission/remove", response_model=ModelPermission)
 async def delete_model_permission(
     permission_data: ModelPermission,
     db: AsyncSession = Depends(get_db),
@@ -623,6 +642,11 @@ async def delete_model_permission(
         if user_cache_key in models_cache.model_permissions:
             del models_cache.model_permissions[user_cache_key]
             logger.info(f"Invalidated permissions cache for user {permission_data.user_id}")
+        
+        # Most importantly, invalidate the user's cached models list
+        if permission_data.user_id in models_cache.user_models:
+            del models_cache.user_models[permission_data.user_id]
+            logger.info(f"Cleared user {permission_data.user_id} models cache after permission removal")
     else:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -725,8 +749,8 @@ async def read_user_model_permissions(
     
     return permissions_dict
 
-# Modify the existing clear-permissions-cache endpoint to also clear user permissions
-@router.post("/permissions/clear-cache", response_model=dict)
+# Existing endpoint for clearing permissions cache - update the path
+@router.post("/permission/clear-cache", response_model=dict)
 async def clear_permissions_cache(
     current_user: User = Depends(get_current_admin_user),
 ) -> Any:

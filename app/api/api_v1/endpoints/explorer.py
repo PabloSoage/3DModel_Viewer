@@ -36,7 +36,7 @@ def get_media_type(file_path: str) -> str:
     return None
 
 
-def check_path_permission(path: str, user: User, db: AsyncSession) -> bool:
+async def check_path_permission(path: str, user: User, db: AsyncSession) -> bool:
     """
     Check if a user has permission to access a path.
     Admin users can access any path.
@@ -52,7 +52,7 @@ def check_path_permission(path: str, user: User, db: AsyncSession) -> bool:
         user_model_permissions.c.user_id == user.id
     )
     
-    result = db.execute(query)
+    result = await db.execute(query)  # Now correctly awaiting the coroutine
     models = result.scalars().all()
     
     # Check if the path is under any of the models the user has access to
@@ -84,8 +84,8 @@ async def list_directory(
             detail="Path not found",
         )
     
-    # Check if the user has access to the path
-    if not check_path_permission(path, current_user, db):
+    # Check if the user has access to the path - now with await
+    if not await check_path_permission(path, current_user, db):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions to access this path",
@@ -166,8 +166,8 @@ async def get_media_files(
             detail="Path not found",
         )
     
-    # Check if the user has access to the path
-    if not check_path_permission(path, current_user, db):
+    # Check if the user has access to the path - now with await
+    if not await check_path_permission(path, current_user, db):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions to access this path",

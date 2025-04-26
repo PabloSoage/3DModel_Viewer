@@ -258,6 +258,28 @@ const Auth = {
         try {
             const response = await fetch(url, options);
             
+            // Handle 403 Forbidden to clear media cache for specific paths
+            if (response.status === 403) {
+                const modelPath = new URLSearchParams(url.split('?')[1]).get('path');
+                if (modelPath && url.includes('/explorer/media-files/')) {
+                    console.warn(`Permission denied for: ${modelPath} - clearing from cache`);
+                    try {
+                        // Remove this model from localStorage media cache
+                        const cacheKey = 'mediaFiles_' + encodeURIComponent(modelPath);
+                        localStorage.removeItem(cacheKey);
+                        console.log(`Cleared cached media for ${modelPath} due to permission error`);
+                    } catch (e) {
+                        console.error("Error clearing cache:", e);
+                    }
+                    
+                    // Also reload the page if on models page to refresh permissions
+                    if (window.location.pathname === '/models') {
+                        console.log("Reloading page to refresh permissions");
+                        setTimeout(() => window.location.reload(), 2000);
+                    }
+                }
+            }
+            
             // Only handle 401 for non-media requests to avoid token removal during bulk operations
             if (response.status === 401) {
                 // Don't immediately redirect for media-files endpoint failures

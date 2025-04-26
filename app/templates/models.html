@@ -529,83 +529,129 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
     }
     
-    // Lazily load preview images for visible models
-    function lazyLoadModelPreviews() {
-        // Only get containers without images
-        const previewContainers = document.querySelectorAll('.model-preview-container:not(:has(img.preview-image))');
-        
-        Array.from(previewContainers).forEach(async (container) => {
-            const modelPath = container.dataset.modelPath;
-            if (!modelPath) return;
+    // Add missing function to replace spinner with "No preview" message
+function replaceSpinnerWithNoPreviewMessage(container) {
+    container.innerHTML = `
+        <div class="text-center p-3 text-muted">
+            <i class="bi bi-image text-secondary" style="font-size: 2rem;"></i>
+            <p class="mt-2 mb-0 small">No preview</p>
+        </div>
+    `;
+}
+
+// LRU Cache mechanism for media files to avoid quota errors
+const MediaCache = {
+    // Maximum number of model directory caches to keep in localStorage
+    MAX_CACHED_MODELS: 5,
+    
+    // Cache key prefix for media files
+    KEY_PREFIX: 'mediaFiles_',
+    
+    // Get media files from cache
+    get: function(modelPath) {
+        const cacheKey = this.KEY_PREFIX + encodeURIComponent(modelPath);
+        try {
+            const cached = localStorage.getItem(cacheKey);
+            return cached ? JSON.parse(cached) : null;
+        } catch (e) {
+            console.warn('Error reading from cache:', e);
+            return null;
+        }
+    },
+    
+    // Store media files in cache with LRU eviction
+    set: function(modelPath, mediaFiles) {
+        try {
+            const cacheKey = this.KEY_PREFIX + encodeURIComponent(modelPath);
             
-            try {
-                // Use cached mediaFiles if available
-                const cacheKey = `mediaFiles_${encodeURIComponent(modelPath)}`;
-                let mediaFiles;
-                const cached = localStorage.getItem(cacheKey);
-                if (cached) {
-                    try {
-                        mediaFiles = JSON.parse(cached);
-                    } catch (e) {
-                        // Invalid cache, fetch again
-                    }
+            // First, get all keys related to media files
+            const mediaKeys = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith(this.KEY_PREFIX)) {
+                    mediaKeys.push(key);
                 }
-                
-                // If no cache, fetch from API
-                if (!mediaFiles) {
-                    const response = await Auth.fetch(`/api/v1/explorer/media-files/?path=${encodeURIComponent(modelPath)}`);
-                    
-                    if (!response.ok) {
-                        // Failed to fetch media files - replace spinner with "No preview"
-                        replaceSpinnerWithNoPreviewMessage(container);
-                        return;
+            }
+            
+            // If we have too many cached models, remove the oldest ones
+            if (mediaKeys.length >= this.MAX_CACHED_MODELS) {
+                // Sort keys by when they were last accessed (if we have that info)
+                // For simplicity, just remove the first ones we find
+                const toRemove = mediaKeys.slice(0, mediaKeys.length - this.MAX_CACHED_MODELS + 1);
+                toRemove.forEach(key => {
+                    if (key !== cacheKey) { // Don't remove the one we're about to add
+                        localStorage.removeItem(key);
+                        console.log(`Removed old cache entry: ${key}`);
                     }
-                    
-                    mediaFiles = await response.json();
-                    try {
-                        localStorage.setItem(cacheKey, JSON.stringify(mediaFiles));
-                    } catch (e) {
-                        console.warn("Local storage quota exceeded, can't cache media files");
-                    }
-                }
+                });
+            }
+            
+            // Now try to store the new item
+            localStorage.setItem(cacheKey, JSON.stringify(mediaFiles));
+            return true;
+        } catch (e) {
+            console.warn('Cache storage failed:', e);
+            return false;
+        }
+    }
+};
+
+// Lazily load model previews
+function lazyLoadModelPreviews() {
+    // Only get containers without images
+    const previewContainers = document.querySelectorAll('.model-preview-container:not(:has(img.preview-image))');
+    
+    Array.from(previewContainers).forEach(async (container) => {
+        const modelPath = container.dataset.modelPath;
+        if (!modelPath) return;
+        
+        try {
+            // Use cached mediaFiles if available
+            let mediaFiles = MediaCache.get(modelPath);
+            
+            // If no cache, fetch from API
+            if (!mediaFiles) {
+                const response = await Auth.fetch(`/api/v1/explorer/media-files/?path=${encodeURIComponent(modelPath)}`);
                 
-                // Find first image for preview
-                const previewImage = mediaFiles.find(file => file.media_type && file.media_type.startsWith('image/'));
-                
-                if (previewImage) {
-                    const img = document.createElement('img');
-                    img.className = 'img-fluid preview-image';
-                    img.alt = 'Model preview';
-                    img.src = `/api/v1/files/download?path=${encodeURIComponent(previewImage.path)}`;
-                    
-                    // Replace loading spinner
-                    container.innerHTML = '';
-                    container.appendChild(img);
-                    
-                    // Apply zoom to new image
-                    setupImageZoom();
-                } else {
-                    // No preview image found - replace spinner with "No preview" message
+                if (!response.ok) {
+                    // Failed to fetch media files - replace spinner with "No preview"
                     replaceSpinnerWithNoPreviewMessage(container);
+                    return;
                 }
-            } catch (error) {
-                console.error(`Error loading media:`, error);
-                // Replace spinner with "No preview" message on error
+                
+                mediaFiles = await response.json();
+                
+                // Try to cache, but don't fail if storage quota is exceeded
+                MediaCache.set(modelPath, mediaFiles);
+            }
+            
+            // Find first image for preview
+            const previewImage = mediaFiles.find(file => file.media_type && file.media_type.startsWith('image/'));
+            
+            if (previewImage) {
+                const img = document.createElement('img');
+                img.className = 'img-fluid preview-image';
+                img.alt = 'Model preview';
+                img.src = `/api/v1/files/download?path=${encodeURIComponent(previewImage.path)}`;
+                
+                // Replace loading spinner
+                container.innerHTML = '';
+                container.appendChild(img);
+                
+                // Apply zoom to new image
+                setupImageZoom();
+            } else {
+                // No preview image found - replace spinner with "No preview" message
                 replaceSpinnerWithNoPreviewMessage(container);
             }
-        });
-    }
-    
-    // Helper function to replace spinner with a "No preview" message
-    function replaceSpinnerWithNoPreviewMessage(container) {
-        container.innerHTML = `
-            <div class="text-center p-3 text-muted">
-                <i class="bi bi-image text-secondary" style="font-size: 2rem;"></i>
-                <p class="mt-2 mb-0 small">No preview</p>
-            </div>
-        `;
-    }
-    
+        } catch (error) {
+            console.error(`Error loading media:`, error);
+            // Replace spinner with "No preview" message on error
+            replaceSpinnerWithNoPreviewMessage(container);
+        }
+    });
+}
+
     // Search input handler with debounce
     let searchDebounceTimer;
     modelSearch.addEventListener('input', (e) => {

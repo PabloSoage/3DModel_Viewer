@@ -650,7 +650,64 @@
             lazyLoadModelPreviews();
         }
         
-        // Lazily load preview images only for visible models - fix infinite spinner issue
+        // LRU Cache mechanism for media files to avoid quota errors
+const MediaCache = {
+    // Maximum number of model directory caches to keep in localStorage
+    MAX_CACHED_MODELS: 10,
+    
+    // Cache key prefix for media files
+    KEY_PREFIX: 'mediaFiles_',
+    
+    // Get media files from cache
+    get: function(modelPath) {
+        const cacheKey = this.KEY_PREFIX + encodeURIComponent(modelPath);
+        try {
+            const cached = localStorage.getItem(cacheKey);
+            return cached ? JSON.parse(cached) : null;
+        } catch (e) {
+            console.warn('Error reading from cache:', e);
+            return null;
+        }
+    },
+    
+    // Store media files in cache with LRU eviction
+    set: function(modelPath, mediaFiles) {
+        try {
+            const cacheKey = this.KEY_PREFIX + encodeURIComponent(modelPath);
+            
+            // First, get all keys related to media files
+            const mediaKeys = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith(this.KEY_PREFIX)) {
+                    mediaKeys.push(key);
+                }
+            }
+            
+            // If we have too many cached models, remove the oldest ones
+            if (mediaKeys.length >= this.MAX_CACHED_MODELS) {
+                // Sort keys by when they were last accessed (if we have that info)
+                // For simplicity, just remove the first ones we find
+                const toRemove = mediaKeys.slice(0, mediaKeys.length - this.MAX_CACHED_MODELS + 1);
+                toRemove.forEach(key => {
+                    if (key !== cacheKey) { // Don't remove the one we're about to add
+                        localStorage.removeItem(key);
+                        console.log(`Removed old cache entry: ${key}`);
+                    }
+                });
+            }
+            
+            // Now try to store the new item
+            localStorage.setItem(cacheKey, JSON.stringify(mediaFiles));
+            return true;
+        } catch (e) {
+            console.warn('Cache storage failed:', e);
+            return false;
+        }
+    }
+};
+
+        // Lazily load preview images only for visible models
         function lazyLoadModelPreviews() {
             // Only get containers that don't have images yet
             const previewContainers = document.querySelectorAll('.model-preview-container:not(:has(img.preview-image))');
@@ -662,18 +719,9 @@
                 
                 try {
                     // Use cached mediaFiles if available
-                    const cacheKey = `mediaFiles_${encodeURIComponent(modelPath)}`;
-                    let mediaFiles;
-                    const cached = localStorage.getItem(cacheKey);
-                    if (cached) {
-                        try {
-                            mediaFiles = JSON.parse(cached);
-                        } catch (e) {
-                            // Invalid cache, we'll fetch again
-                        }
-                    }
+                    let mediaFiles = MediaCache.get(modelPath);
                     
-                    // If no cache or invalid cache, fetch from API
+                    // If no cache, fetch from API
                     if (!mediaFiles) {
                         const response = await Auth.fetch(`/api/v1/explorer/media-files/?path=${encodeURIComponent(modelPath)}`);
                         
@@ -684,11 +732,8 @@
                         }
                         
                         mediaFiles = await response.json();
-                        try {
-                            localStorage.setItem(cacheKey, JSON.stringify(mediaFiles));
-                        } catch (e) {
-                            console.warn("Local storage quota exceeded, can't cache media files");
-                        }
+                        // Try to cache but don't fail if storage is full
+                        MediaCache.set(modelPath, mediaFiles);
                     }
                     
                     // Find the first image to use as preview
@@ -716,6 +761,28 @@
                     <p class="mt-2 mb-0 small">No preview</p>
                 </div>
             `;
+        }
+
+        // Add the missing function to update model previews
+        function updateModelPreview(modelId, imagePath) {
+            // Find all preview containers for this model ID
+            const containers = document.querySelectorAll(`.model-preview-container[data-model-id="${modelId}"]`);
+            
+            containers.forEach(container => {
+                // Create and set up the image
+                const img = document.createElement('img');
+                img.className = 'img-fluid preview-image';
+                img.alt = 'Model preview';
+                img.src = `/api/v1/files/download?path=${encodeURIComponent(imagePath)}`;
+                img.loading = 'lazy'; // Use lazy loading for better performance
+                
+                // Clear the container (remove spinner) and add the image
+                container.innerHTML = '';
+                container.appendChild(img);
+            });
+            
+            // Apply any zoom functionality to the new images
+            setupImageZoom();
         }
 
         // Search input handler - use debounce to avoid too many renders on fast typing

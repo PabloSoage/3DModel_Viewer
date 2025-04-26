@@ -130,8 +130,8 @@ async def download_file(
     # Log the request for debugging
     logger.info(f"File download requested: {path}")
     
-    # Check if the user has access to the path
-    if not check_path_permission(path, current_user, db):
+    # Check if the user has access to the path - now with await
+    if not await check_path_permission(path, current_user, db):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions to access this file",
@@ -231,8 +231,8 @@ async def download_directory_as_zip(
             detail="Directory not found",
         )
     
-    # Check if the user has access to the path
-    if not check_path_permission(path, current_user, db):
+    # Check if the user has access to the path - now with await
+    if not await check_path_permission(path, current_user, db):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions to access this directory",
@@ -294,8 +294,8 @@ async def view_text_file(
             detail="File not found",
         )
     
-    # Check if the user has access to the path
-    if not check_path_permission(path, current_user, db):
+    # Check if the user has access to the path - now with await
+    if not await check_path_permission(path, current_user, db):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions to access this file",

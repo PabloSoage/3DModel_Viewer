@@ -407,7 +407,134 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     });
     
-    // Refresh permissions handler
+    // Save model permissions - update API URLs
+    async function saveModelPermissions() {
+        const userId = parseInt(permissionsUserId.value);
+        const checkboxes = document.querySelectorAll('.model-permission-checkbox');
+        
+        try {
+            // Add a loading indicator
+            const saveBtn = document.getElementById('save-permissions-btn');
+            const originalBtnText = saveBtn.innerHTML;
+            saveBtn.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...`;
+            saveBtn.disabled = true;
+            
+            let successCount = 0;
+            let errorCount = 0;
+            
+            for (const checkbox of checkboxes) {
+                const modelId = parseInt(checkbox.dataset.modelId);
+                const hasPermission = checkbox.checked;
+                
+                // Skip if modelId is not a valid number
+                if (isNaN(modelId)) {
+                    console.warn(`Invalid model ID: ${checkbox.dataset.modelId}`);
+                    continue;
+                }
+                
+                // If permission already matches what we want, skip
+                if (userModelPermissions[modelId] === hasPermission) {
+                    continue;
+                }
+                
+                // Add or remove permission - Use the updated API endpoints
+                if (hasPermission) {
+                    // Add permission - Changed from '/api/v1/models/permissions' to '/api/v1/models/permission/add'
+                    const response = await Auth.fetch('/api/v1/models/permission/add', {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            model_id: modelId,
+                            user_id: userId
+                        })
+                    });
+                    
+                    if (!response) {
+                        console.error(`No se pudo añadir permiso para el modelo ${modelId}`);
+                        errorCount++;
+                        continue;
+                    }
+                    
+                    if (!response.ok) {
+                        // Log more details about the error
+                        let errorText = '';
+                        try {
+                            const errorData = await response.json();
+                            errorText = JSON.stringify(errorData);
+                        } catch (e) {
+                            errorText = await response.text();
+                        }
+                        console.error(`Error adding permission for model ${modelId}: ${response.status} - ${errorText}`);
+                        errorCount++;
+                        continue;
+                    }
+                    
+                    successCount++;
+                } else {
+                    // Remove permission - Changed from '/api/v1/models/permissions' to '/api/v1/models/permission/remove'
+                    const response = await Auth.fetch('/api/v1/models/permission/remove', {
+                        method: 'DELETE',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            model_id: modelId,
+                            user_id: userId
+                        })
+                    });
+                    
+                    if (!response) {
+                        console.error(`No se pudo eliminar permiso para el modelo ${modelId}`);
+                        errorCount++;
+                        continue;
+                    }
+                    
+                    if (!response.ok) {
+                        let errorText = '';
+                        try {
+                            const errorData = await response.json();
+                            errorText = JSON.stringify(errorData);
+                        } catch (e) {
+                            errorText = await response.text();
+                        }
+                        console.error(`Error removing permission for model ${modelId}: ${response.status} - ${errorText}`);
+                        errorCount++;
+                        continue;
+                    }
+                    
+                    successCount++;
+                }
+            }
+            
+            // Restore button state
+            saveBtn.innerHTML = originalBtnText;
+            saveBtn.disabled = false;
+            
+            // Close modal
+            const modal = bootstrap.Modal.getInstance(document.getElementById('modelPermissionsModal'));
+            modal.hide();
+            
+            // Show success message with counts
+            if (errorCount > 0) {
+                showToast(`Permissions updated with ${successCount} successes and ${errorCount} errors.`, 'warning');
+            } else {
+                showToast(`${successCount} permissions updated successfully.`, 'success');
+            }
+            
+        } catch (error) {
+            console.error('Error saving permissions:', error);
+            showToast(`Error updating permissions: ${error.message}`, 'danger');
+            
+            // Ensure button is restored even on error
+            const saveBtn = document.getElementById('save-permissions-btn');
+            saveBtn.innerHTML = `Save Changes`;
+            saveBtn.disabled = false;
+        }
+    }
+    
+    // Refresh permissions handler - update cache clear endpoint
     refreshPermissionsBtn.addEventListener('click', async () => {
         const userId = permissionsUserId.value;
         if (!userId) return;
@@ -419,8 +546,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         selectAllContainer.style.display = 'none';
         
         try {
-            // Clear server cache first
-            await Auth.fetch('/api/v1/models/permissions/clear-cache', { method: 'POST' });
+            // Clear server cache first - Changed from '/api/v1/models/permissions/clear-cache' to '/api/v1/models/permission/clear-cache'
+            await Auth.fetch('/api/v1/models/permission/clear-cache', { method: 'POST' });
             
             // Then reload permissions with force refresh - using bulk endpoint
             await loadUserModelPermissions(userId, true);
@@ -612,80 +739,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         } catch (error) {
             console.error('Error loading models:', error);
             return [];
-        }
-    }
-    
-    // Save model permissions
-    async function saveModelPermissions() {
-        const userId = permissionsUserId.value;
-        const checkboxes = document.querySelectorAll('.model-permission-checkbox');
-        
-        try {
-            for (const checkbox of checkboxes) {
-                const modelId = checkbox.dataset.modelId;
-                const hasPermission = checkbox.checked;
-                
-                // If permission already matches what we want, skip
-                if (userModelPermissions[modelId] === hasPermission) {
-                    continue;
-                }
-                
-                // Add or remove permission
-                if (hasPermission) {
-                    // Add permission
-                    const response = await Auth.fetch('/api/v1/models/permissions', {
-                        method: 'PUT',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            model_id: Number(modelId),
-                            user_id: Number(userId)
-                        })
-                    });
-                    
-                    if (!response) {
-                        console.error(`No se pudo añadir permiso para el modelo ${modelId}`);
-                        continue;
-                    }
-                    
-                    if (!response.ok) {
-                        throw new Error(`Failed to add permission for model ${modelId}`);
-                    }
-                } else {
-                    // Remove permission
-                    const response = await Auth.fetch('/api/v1/models/permissions', {
-                        method: 'DELETE',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            model_id: Number(modelId),
-                            user_id: Number(userId)
-                        })
-                    });
-                    
-                    if (!response) {
-                        console.error(`No se pudo eliminar permiso para el modelo ${modelId}`);
-                        continue;
-                    }
-                    
-                    if (!response.ok) {
-                        throw new Error(`Failed to remove permission for model ${modelId}`);
-                    }
-                }
-            }
-            
-            // Close modal
-            const modal = bootstrap.Modal.getInstance(document.getElementById('modelPermissionsModal'));
-            modal.hide();
-            
-            // Show success message
-            showToast('Permissions updated successfully.', 'success');
-            
-        } catch (error) {
-            console.error('Error saving permissions:', error);
-            showToast(`Error updating permissions: ${error.message}`, 'danger');
         }
     }
     
