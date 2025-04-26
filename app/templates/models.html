@@ -5,15 +5,25 @@
 {% block content %}
 <div class="row mb-4">
     <div class="col-md-6">
-        <h1 class="mb-0">3D Models</h1>
-        <p class="text-muted">Your accessible models <span class="badge bg-info" id="models-count">0 models</span></p>
+        <h1 class="mb-0">3D Models <span class="badge bg-info" id="models-count">Loading...</span></h1>
     </div>
     <div class="col-md-6 text-end">
-        <!-- Add search bar -->
-        <div class="d-flex justify-content-end gap-2">
-            <div class="input-group me-2" style="max-width: 300px;">
+        <!-- Improved action bar with better spacing -->
+        <div class="d-flex justify-content-end align-items-center action-bar">
+            <!-- Search bar with reduced width -->
+            <div class="input-group me-3" style="max-width: 220px;">
                 <span class="input-group-text"><i class="bi bi-search"></i></span>
-                <input type="text" class="form-control" id="model-search" placeholder="Search models...">
+                <input type="text" class="form-control" id="model-search" placeholder="Search...">
+            </div>
+            <!-- Show dropdown with increased width and fixed margin -->
+            <div class="input-group me-3" style="width: 140px;">
+                <label class="input-group-text" for="models-per-page">Show</label>
+                <select class="form-select" id="models-per-page">
+                    <option value="24">24</option>
+                    <option value="48">48</option>
+                    <option value="96">96</option>
+                    <option value="10000">All</option>
+                </select>
             </div>
             <div class="btn-group">
                 <button class="btn btn-outline-primary" id="refresh-button">
@@ -27,7 +37,7 @@
     </div>
 </div>
 
-<div class="row mb-4" id="models-grid-container">
+<div class="row mb-4 regular-models" id="models-grid-container">
     <!-- Models will be loaded dynamically here -->
     <div class="col-12 text-center py-5">
         <div class="spinner-border text-primary" role="status">
@@ -37,31 +47,40 @@
     </div>
 </div>
 
-<!-- Template for grid card view -->
+<!-- Add pagination controls at the bottom -->
+<div class="row">
+    <div class="col-12">
+        <nav aria-label="Page navigation" class="d-flex justify-content-between align-items-center">
+            <div>
+                <span class="text-muted" id="pagination-info">Showing 1-24 of 0 models</span>
+            </div>
+            <ul class="pagination" id="pagination-controls">
+                <!-- Pagination controls will be added dynamically -->
+            </ul>
+        </nav>
+    </div>
+</div>
+
+<!-- Add template components and loading spinner -->
 <template id="model-card-template">
-    <div class="col-md-4 col-sm-6 mb-4">
+    <div class="col-lg-4 col-md-6 mb-4">
         <div class="card h-100">
             <div class="card-body">
                 <h5 class="card-title model-name"></h5>
-                <p class="card-text model-description text-muted"></p>
+                <p class="card-text model-description"></p>
                 <div class="model-preview-container text-center mb-3">
                     <!-- Preview image will be inserted here if available -->
                 </div>
             </div>
             <div class="card-footer bg-transparent">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <a href="#" class="btn btn-primary btn-sm explore-model-btn">
-                            <i class="bi bi-folder2-open"></i> Explore
-                        </a>
-                    </div>
-                </div>
+                <a href="#" class="btn btn-primary explore-model-btn">
+                    <i class="bi bi-folder2-open"></i> Explore
+                </a>
             </div>
         </div>
     </div>
 </template>
 
-<!-- Template for list view row -->
 <template id="model-row-template">
     <div class="col-12 mb-2">
         <div class="card">
@@ -72,7 +91,7 @@
                         <small class="text-muted model-description"></small>
                     </div>
                     <div class="col-md-6 col-sm-4 text-sm-end mt-2 mt-sm-0">
-                        <a href="#" class="btn btn-primary btn-sm me-1 explore-model-btn">
+                        <a href="#" class="btn btn-primary btn-sm explore-model-btn">
                             <i class="bi bi-folder2-open"></i> Explore
                         </a>
                     </div>
@@ -82,7 +101,6 @@
     </div>
 </template>
 
-<!-- Template for no models found -->
 <template id="no-models-template">
     <div class="col-12 text-center py-5">
         <div class="display-1 text-muted mb-3">
@@ -90,392 +108,528 @@
         </div>
         <h4 class="text-muted">No models available</h4>
         <p class="text-muted">
-            You don't have access to any 3D models yet. Contact the administrator to request access.
+            You don't have access to any models. Please contact an administrator.
         </p>
+    </div>
+</template>
+
+<template id="loading-template">
+    <div class="col-12 text-center py-5">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <p class="mt-2 text-muted">Loading models...</p>
     </div>
 </template>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-    document.addEventListener('DOMContentLoaded', async function() {
-        // Usar Auth.protectRoute para verificar la autenticación
-        // Esto redirigirá automáticamente a login si no hay un token válido
-        const authenticated = await Auth.protectRoute();
-        if (!authenticated) return;
-
-        const modelsContainer = document.getElementById('models-grid-container');
-        const toggleViewBtn = document.getElementById('toggle-view-button');
-        const refreshButton = document.getElementById('refresh-button');
-        const modelCardTemplate = document.getElementById('model-card-template');
-        const modelRowTemplate = document.getElementById('model-row-template');
-        const noModelsTemplate = document.getElementById('no-models-template');
-        const searchInput = document.getElementById('model-search');
-        
-        let currentView = 'grid'; // Default view is grid
-        let allModelsData = []; // Store all models data for filtering
-        let loadInProgress = false; // Track if a load is in progress
-        
-        // Render models based on current view
-        function renderModels(models) {
-            modelsContainer.innerHTML = '';
-            
-            // Update model count badge
-            document.getElementById('models-count').textContent = `${models.length} models`;
-            
-            if (!models.length) {
-                modelsContainer.appendChild(noModelsTemplate.content.cloneNode(true));
-                return;
-            }
-            
-            models.forEach(model => {
-                if (currentView === 'grid') {
-                    const modelCard = modelCardTemplate.content.cloneNode(true);
-                    modelCard.querySelector('.model-name').textContent = model.name;
-                    const descEl = modelCard.querySelector('.model-description');
-                    // Hide default auto-discovered descriptions
-                    if (model.description && !model.description.startsWith('Auto-discovered')) {
-                        descEl.textContent = model.description;
-                    } else {
-                        descEl.remove();
-                        // Expand preview container when no description
-                        const previewContainer = modelCard.querySelector('.model-preview-container');
-                        previewContainer.classList.add('expanded-preview');
-                    }
-                    
-                    const exploreBtn = modelCard.querySelector('.explore-model-btn');
-                    exploreBtn.href = `/explorer/${model.id}`;
-                    
-                    // Add model preview placeholder
-                    const previewContainer = modelCard.querySelector('.model-preview-container');
-                    
-                    // Set data-model-id and data-model-path for later preview update
-                    previewContainer.dataset.modelId = model.id;
-                    previewContainer.dataset.modelPath = model.path;
-                    
-                    // Show preview_image directly if set
-                    if (model.preview_image) {
-                        const img = document.createElement('img');
-                        img.className = 'img-fluid';
-                        img.alt = model.name;
-                        img.src = `/api/v1/files/download?path=${encodeURIComponent(model.preview_image)}`;
-                        previewContainer.appendChild(img);
-                    } else {
-                        // Show a spinner until we find preview images
-                        previewContainer.innerHTML = `
-                            <div class="placeholder-spinner">
-                                <div class="spinner-border spinner-border-sm text-secondary" role="status">
-                                    <span class="visually-hidden">Loading preview...</span>
-                                </div>
-                            </div>`;
-                    }
-                    
-                    modelsContainer.appendChild(modelCard);
-                } else {
-                    const modelRow = modelRowTemplate.content.cloneNode(true);
-                    modelRow.querySelector('.model-name').textContent = model.name;
-                    modelRow.querySelector('.model-description').textContent = model.description || 'No description available';
-                    
-                    const exploreBtn = modelRow.querySelector('.explore-model-btn');
-                    exploreBtn.href = `/explorer/${model.id}`;
-                    
-                    modelsContainer.appendChild(modelRow);
-                }
-            });
+document.addEventListener('DOMContentLoaded', async function() {
+    // Verify authentication
+    const isAuthenticated = await Auth.protectRoute();
+    if (!isAuthenticated) {
+        return;
+    }
+    
+    // DOM elements
+    const modelsContainer = document.getElementById('models-grid-container');
+    const modelCardTemplate = document.getElementById('model-card-template');
+    const modelRowTemplate = document.getElementById('model-row-template');
+    const noModelsTemplate = document.getElementById('no-models-template');
+    const loadingTemplate = document.getElementById('loading-template');
+    const modelsPerPageSelect = document.getElementById('models-per-page');
+    const modelsCount = document.getElementById('models-count');
+    const paginationInfo = document.getElementById('pagination-info');
+    const paginationControls = document.getElementById('pagination-controls');
+    const modelSearch = document.getElementById('model-search');
+    const refreshButton = document.getElementById('refresh-button');
+    const toggleViewBtn = document.getElementById('toggle-view-button');
+    
+    // Pagination and view state
+    let currentPage = 1;
+    let itemsPerPage = 24;
+    let totalModels = 0;
+    let totalPages = 0;
+    let allModels = [];
+    let filteredModels = [];
+    let currentView = 'grid'; // Default view is grid
+    let lastSearchTerm = '';
+    
+    // Set default or load from localStorage
+    const storedItemsPerPage = localStorage.getItem('modelsPerPage');
+    if (storedItemsPerPage) {
+        itemsPerPage = parseInt(storedItemsPerPage);
+        modelsPerPageSelect.value = itemsPerPage;
+    }
+    
+    // Get current page and view from URL if present
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has('page')) {
+        currentPage = parseInt(urlParams.get('page')) || 1;
+    }
+    if (urlParams.has('view')) {
+        currentView = urlParams.get('view');
+        toggleViewBtn.dataset.view = currentView;
+        if (currentView === 'list') {
+            toggleViewBtn.innerHTML = '<i class="bi bi-grid"></i> Grid View';
+        } else {
+            toggleViewBtn.innerHTML = '<i class="bi bi-list"></i> List View';
         }
-
-        // Filter models based on search input
-        function filterModels(searchTerm) {
-            searchTerm = searchTerm.toLowerCase().trim();
-            
-            if (!searchTerm) {
-                renderModels(allModelsData);
-                return;
-            }
-            
-            const filteredModels = allModelsData.filter(model => 
-                model.name.toLowerCase().includes(searchTerm) || 
-                (model.description && model.description.toLowerCase().includes(searchTerm))
-            );
-            
-            renderModels(filteredModels);
-        }
-
-        // Load models
-        async function loadModels(forceRefresh = false) {
-            // If a load is already in progress, don't start another one
-            if (loadInProgress) {
-                return;
-            }
-            
-            loadInProgress = true;
-            
-            try {
-                // Show loading state
-                modelsContainer.innerHTML = `
-                    <div class="col-12 text-center py-5">
-                        <div class="spinner-border text-primary" role="status">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
-                        <p class="mt-2 text-muted">Loading models...</p>
-                    </div>
-                `;
-                
-                // Use Auth.fetch instead of normal fetch to include the token automatically
-                // Add a much larger limit parameter to retrieve all models
-                // Add forceRefresh parameter when requested
-                const url = forceRefresh ? 
-                    '/api/v1/models?limit=10000&force_refresh=true' : 
-                    '/api/v1/models?limit=10000';
-                
-                const response = await Auth.fetch(url);
-                
-                if (!response || !response.ok) {
-                    throw new Error('Failed to load models');
-                }
-                
-                allModelsData = await response.json();
-                renderModels(allModelsData);
-                
-                // Load media files with concurrency control
-                await loadModelMediaFiles(allModelsData);
-                
-            } catch (error) {
-                console.error('Error loading models:', error);
-                showToast('Failed to load models: ' + error.message, 'danger');
-                modelsContainer.innerHTML = `
-                    <div class="col-12 text-center py-5">
-                        <div class="alert alert-danger">
-                            <i class="bi bi-exclamation-triangle-fill"></i> Failed to load models: ${error.message}
-                        </div>
-                        <button class="btn btn-primary" onclick="location.reload()">Try Again</button>
-                    </div>
-                `;
-            } finally {
-                // Always reset the loading flag
-                loadInProgress = false;
-            }
-        }
-        
-        // Load preview images for all models
-        async function loadModelMediaFiles(models) {
-            // Create a queue of models to process
-            const modelQueue = [...models];
-            
-            // Set maximum concurrent requests
-            const MAX_CONCURRENT = 5;
-            let activeRequests = 0;
-            let retryQueue = [];
-            
-            // Process the queue with limited concurrency
-            async function processQueue() {
-                if (modelQueue.length === 0 && retryQueue.length === 0) return;
-                
-                while ((modelQueue.length > 0 || retryQueue.length > 0) && activeRequests < MAX_CONCURRENT) {
-                    activeRequests++;
-                    
-                    // First process retry queue if it has items
-                    const model = retryQueue.length > 0 ? retryQueue.shift() : modelQueue.shift();
-                    if (!model) {
-                        activeRequests--;
-                        continue;
-                    }
-                    
-                    try {
-                        // Skip models that already have a preview_image
-                        if (model.preview_image) {
-                            activeRequests--;
-                            continue;
-                        }
-                        
-                        const cacheKey = `mediaFiles_${encodeURIComponent(model.path)}`;
-                        let mediaFiles;
-                        
-                        // Check for cached results first
-                        const cached = localStorage.getItem(cacheKey);
-                        if (cached) {
-                            try {
-                                mediaFiles = JSON.parse(cached);
-                            } catch (e) {
-                                // Invalid cache, we'll fetch again
-                            }
-                        }
-                        
-                        // If no cache or invalid cache, fetch from API
-                        if (!mediaFiles) {
-                            const response = await Auth.fetch(`/api/v1/explorer/media-files/?path=${encodeURIComponent(model.path)}`);
-                            
-                            if (response && response.ok) {
-                                mediaFiles = await response.json();
-                                try {
-                                    localStorage.setItem(cacheKey, JSON.stringify(mediaFiles));
-                                } catch (e) {
-                                    console.warn("Local storage quota exceeded, can't cache media files");
-                                }
-                            } else if (response && response.status === 429) {
-                                // Rate limited, add back to retry queue
-                                console.log(`Rate limited for ${model.name}, will retry`);
-                                retryQueue.push(model);
-                                await new Promise(r => setTimeout(r, 2000)); // Wait 2s before retry
-                                activeRequests--;
-                                continue;
-                            } else {
-                                throw new Error(`Failed to load media files for ${model.name}`);
-                            }
-                        }
-                        
-                        // Find the first image in media files to use as preview
-                        const previewImage = mediaFiles.find(file => 
-                            file.media_type && file.media_type.startsWith('image/'));
-                        
-                        if (previewImage) {
-                            // Update the UI with the preview image
-                            updateModelPreview(model.id, previewImage.path);
-                        }
-                        
-                    } catch (error) {
-                        console.error(`Error loading media for ${model.name}:`, error);
-                    } finally {
-                        activeRequests--;
-                        // Continue processing the queue
-                        processQueue();
-                    }
-                }
-            }
-            
-            // Start initial batch of requests
-            for (let i = 0; i < Math.min(MAX_CONCURRENT, modelQueue.length); i++) {
-                processQueue();
-            }
-            
-            // Wait for all requests to complete
-            while (activeRequests > 0 || modelQueue.length > 0 || retryQueue.length > 0) {
-                await new Promise(r => setTimeout(r, 100));
-            }
-        }
-        
-        // Update model preview with found image
-        function updateModelPreview(modelId, imagePath) {
-            const previewContainer = document.querySelector(`.model-preview-container[data-model-id="${modelId}"]`);
-            if (previewContainer) {
-                const img = document.createElement('img');
-                img.className = 'img-fluid preview-image';
-                img.alt = 'Model preview';
-                img.src = `/api/v1/files/download?path=${encodeURIComponent(imagePath)}`;
-                
-                // Replace loading spinner with image
-                previewContainer.innerHTML = '';
-                previewContainer.appendChild(img);
-            }
-        }
-
-        // Toggle view between grid and list
-        toggleViewBtn.addEventListener('click', function() {
-            if (currentView === 'grid') {
-                currentView = 'list';
-                this.innerHTML = '<i class="bi bi-grid"></i> Grid View';
-                this.dataset.view = 'list';
-            } else {
-                currentView = 'grid';
-                this.innerHTML = '<i class="bi bi-list"></i> List View';
-                this.dataset.view = 'grid';
-            }
-            loadModels();
-        });
-
-        // Refresh button - now using force refresh parameter
-        refreshButton.addEventListener('click', function() {
-            // Pass true to force refresh from filesystem
-            loadModels(true);
-        });
-
-        // Check user role and add admin link if needed
-        async function checkUserRole() {
-            try {
-                const isAdmin = await Auth.isAdmin();
-                
-                // If user is admin, show admin link
-                if (isAdmin) {
-                    const adminLink = document.createElement('div');
-                    adminLink.className = 'mb-3 text-end';
-                    adminLink.innerHTML = `
-                        <a href="/admin/models" class="btn btn-outline-primary">
-                            <i class="bi bi-gear"></i> Switch to Admin View
-                        </a>
-                    `;
-                    
-                    // Insert before the models container
-                    modelsContainer.parentNode.insertBefore(adminLink, modelsContainer);
-                }
-            } catch (error) {
-                console.error('Error fetching user information:', error);
-            }
-        }
-        
-        // Add mouse wheel zoom functionality for preview images
-        function setupImageZoom() {
-            document.addEventListener('mouseover', function(e) {
-                // Check if target is a preview image
-                if (e.target.matches('.model-preview-container img')) {
-                    e.target.addEventListener('wheel', handleImageZoom);
-                }
-            });
-            
-            document.addEventListener('mouseout', function(e) {
-                // Remove wheel listener when mouse leaves image
-                if (e.target.matches('.model-preview-container img')) {
-                    e.target.removeEventListener('wheel', handleImageZoom);
-                    // Reset transform when mouse leaves
-                    e.target.style.transform = '';
-                }
-            });
-        }
-        
-        function handleImageZoom(e) {
-            e.preventDefault(); // Prevent page scrolling
-            
-            // Get current scale from transform or default to the hover scale
-            let currentScale;
-            const transform = e.target.style.transform;
-            
-            if (transform) {
-                const match = transform.match(/scale\(([^)]+)\)/);
-                if (match && match[1]) {
-                    currentScale = parseFloat(match[1]);
-                } else {
-                    // If transform exists but not in scale format, use hover scale
-                    currentScale = parseFloat(getComputedStyle(e.target.parentElement).getPropertyValue('--hover-scale') || 2.2);
-                }
-            } else {
-                // If no transform is set yet, use the hover scale
-                currentScale = parseFloat(getComputedStyle(e.target.parentElement).getPropertyValue('--hover-scale') || 2.2);
-            }
-            
-            // Adjust scale based on wheel direction
-            const delta = e.deltaY > 0 ? -0.5 : 0.5;
-            let newScale = Math.max(1, Math.min(6, currentScale + delta));
-            
-            if (newScale <= 1) {
-                // Reset transform if scale becomes 1 or less
-                e.target.style.transform = '';
-            } else {
-                e.target.style.transform = `scale(${newScale})`;
-            }
-        }
-        
-        // Setup image zoom after models are loaded
-        loadModels(false).then(() => {
-            setupImageZoom();
-        });
-        
-        // Initial load (this is from the existing code)
-        // loadModels();
-        checkUserRole();
-        
-        // Add event listener for search input
-        searchInput.addEventListener('input', (e) => {
-            filterModels(e.target.value);
-        });
+    }
+    
+    // Listen for changes to items per page
+    modelsPerPageSelect.addEventListener('change', function() {
+        itemsPerPage = parseInt(this.value);
+        localStorage.setItem('modelsPerPage', itemsPerPage);
+        currentPage = 1; // Reset to first page when changing items per page
+        updateUrlParams();
+        renderCurrentPage();
     });
+    
+    // Update URL with current pagination state
+    function updateUrlParams() {
+        const url = new URL(window.location);
+        url.searchParams.set('page', currentPage);
+        url.searchParams.set('view', currentView);
+        if (lastSearchTerm) {
+            url.searchParams.set('search', lastSearchTerm);
+        } else {
+            url.searchParams.delete('search');
+        }
+        window.history.replaceState({}, '', url);
+    }
+
+    // Filter models based on search input
+    function applySearchFilter(searchTerm) {
+        lastSearchTerm = searchTerm.toLowerCase().trim();
+        
+        if (!lastSearchTerm) {
+            // If search is cleared, reset to show all models
+            filteredModels = [];
+            currentPage = 1;
+            updateUrlParams();
+            renderCurrentPage();
+            return;
+        }
+        
+        // Filter the models
+        filteredModels = allModels.filter(model => 
+            model.name.toLowerCase().includes(lastSearchTerm) || 
+            (model.description && model.description.toLowerCase().includes(lastSearchTerm))
+        );
+        
+        // Update models count with filtered results
+        modelsCount.textContent = `${filteredModels.length} models`;
+        
+        // Reset to page 1 whenever search changes
+        currentPage = 1;
+        updateUrlParams();
+        renderCurrentPage();
+    }
+    
+    // Load models with proper loading indicator
+    async function loadModels(forceRefresh = false) {
+        // Show loading template
+        modelsContainer.innerHTML = '';
+        modelsContainer.appendChild(loadingTemplate.content.cloneNode(true));
+        modelsCount.textContent = "Loading...";
+        
+        try {
+            // Load all models at once for client-side filtering and pagination
+            const url = forceRefresh ? 
+                '/api/v1/models?limit=10000&force_refresh=true' : 
+                '/api/v1/models?limit=10000';
+            
+            const response = await Auth.fetch(url);
+            
+            if (!response.ok) {
+                throw new Error('Failed to load models');
+            }
+            
+            allModels = await response.json();
+            totalModels = allModels.length;
+            
+            // Update models count badge
+            modelsCount.textContent = `${totalModels} models`;
+            
+            // Apply any existing search filter
+            if (modelSearch.value.trim()) {
+                applySearchFilter(modelSearch.value.trim());
+            } else {
+                // Render first page
+                renderCurrentPage();
+            }
+        } catch (error) {
+            console.error('Error loading models:', error);
+            modelsContainer.innerHTML = `
+                <div class="col-12">
+                    <div class="alert alert-danger">Failed to load models: ${error.message}</div>
+                </div>
+            `;
+            modelsCount.textContent = "Error";
+        }
+    }
+    
+    // Generate pagination controls
+    function renderPagination() {
+        paginationControls.innerHTML = '';
+        
+        // Calculate total pages
+        const displayedModels = lastSearchTerm ? filteredModels : allModels;
+        totalModels = displayedModels.length;
+        totalPages = Math.ceil(totalModels / itemsPerPage);
+        
+        // Update pagination info text
+        const start = totalModels === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1;
+        const end = Math.min(currentPage * itemsPerPage, totalModels);
+        paginationInfo.textContent = `Showing ${start}-${end} of ${totalModels} models`;
+        
+        // Don't show pagination if all items fit on one page
+        if (totalPages <= 1) {
+            return;
+        }
+        
+        // Previous button
+        const prevLi = document.createElement('li');
+        prevLi.className = `page-item ${currentPage === 1 ? 'disabled' : ''}`;
+        prevLi.innerHTML = `<button class="page-link" aria-label="Previous"><span aria-hidden="true">&laquo;</span></button>`;
+        prevLi.addEventListener('click', () => {
+            if (currentPage > 1) {
+                currentPage--;
+                updateUrlParams();
+                renderCurrentPage();
+            }
+        });
+        paginationControls.appendChild(prevLi);
+        
+        // Page numbers logic (showing 5 pages max)
+        let startPage = Math.max(1, currentPage - 2);
+        let endPage = Math.min(totalPages, startPage + 4);
+        if (endPage - startPage < 4 && startPage > 1) {
+            startPage = Math.max(1, endPage - 4);
+        }
+        
+        // First page + ellipsis if needed
+        if (startPage > 1) {
+            const firstLi = document.createElement('li');
+            firstLi.className = 'page-item';
+            firstLi.innerHTML = `<button class="page-link">1</button>`;
+            firstLi.addEventListener('click', () => {
+                currentPage = 1;
+                updateUrlParams();
+                renderCurrentPage();
+            });
+            paginationControls.appendChild(firstLi);
+            
+            if (startPage > 2) {
+                const ellipsisLi = document.createElement('li');
+                ellipsisLi.className = 'page-item disabled';
+                ellipsisLi.innerHTML = `<span class="page-link">...</span>`;
+                paginationControls.appendChild(ellipsisLi);
+            }
+        }
+        
+        // Page numbers
+        for (let i = startPage; i <= endPage; i++) {
+            const pageLi = document.createElement('li');
+            pageLi.className = `page-item ${i === currentPage ? 'active' : ''}`;
+            pageLi.innerHTML = `<button class="page-link">${i}</button>`;
+            pageLi.addEventListener('click', () => {
+                currentPage = i;
+                updateUrlParams();
+                renderCurrentPage();
+            });
+            paginationControls.appendChild(pageLi);
+        }
+        
+        // Ellipsis + last page if needed
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) {
+                const ellipsisLi = document.createElement('li');
+                ellipsisLi.className = 'page-item disabled';
+                ellipsisLi.innerHTML = `<span class="page-link">...</span>`;
+                paginationControls.appendChild(ellipsisLi);
+            }
+            
+            const lastLi = document.createElement('li');
+            lastLi.className = 'page-item';
+            lastLi.innerHTML = `<button class="page-link">${totalPages}</button>`;
+            lastLi.addEventListener('click', () => {
+                currentPage = totalPages;
+                updateUrlParams();
+                renderCurrentPage();
+            });
+            paginationControls.appendChild(lastLi);
+        }
+        
+        // Next button
+        const nextLi = document.createElement('li');
+        nextLi.className = `page-item ${currentPage === totalPages || totalPages === 0 ? 'disabled' : ''}`;
+        nextLi.innerHTML = `<button class="page-link" aria-label="Next"><span aria-hidden="true">&raquo;</span></button>`;
+        nextLi.addEventListener('click', () => {
+            if (currentPage < totalPages) {
+                currentPage++;
+                updateUrlParams();
+                renderCurrentPage();
+            }
+        });
+        paginationControls.appendChild(nextLi);
+    }
+    
+    // Render the current page of models with filter support
+    function renderCurrentPage() {
+        const displayedModels = lastSearchTerm ? filteredModels : allModels;
+        totalModels = displayedModels.length;
+        
+        // Update models count badge
+        modelsCount.textContent = `${totalModels} models`;
+        
+        // Calculate the slice for the current page
+        const startIndex = (currentPage - 1) * itemsPerPage;
+        const endIndex = Math.min(startIndex + itemsPerPage, totalModels);
+        const modelsToRender = displayedModels.slice(startIndex, endIndex);
+        
+        // Clear the container
+        modelsContainer.innerHTML = '';
+        
+        if (!modelsToRender.length) {
+            modelsContainer.appendChild(noModelsTemplate.content.cloneNode(true));
+            renderPagination();
+            return;
+        }
+        
+        // Render the models
+        modelsToRender.forEach(model => {
+            if (currentView === 'grid') {
+                const modelCard = modelCardTemplate.content.cloneNode(true);
+                modelCard.querySelector('.model-name').textContent = model.name;
+                
+                const descElement = modelCard.querySelector('.model-description');
+                if (model.description && !model.description.startsWith('Auto-discovered')) {
+                    descElement.textContent = model.description;
+                } else {
+                    descElement.remove();
+                    
+                }
+                
+                // Setup model preview container
+                const previewContainer = modelCard.querySelector('.model-preview-container');
+                previewContainer.dataset.modelId = model.id;
+                previewContainer.dataset.modelPath = model.path;
+                
+                // Show preview directly if available
+                if (model.preview_image) {
+                    const img = document.createElement('img');
+                    img.className = 'img-fluid preview-image';
+                    img.alt = model.name;
+                    img.src = `/api/v1/files/download?path=${encodeURIComponent(model.preview_image)}`;
+                    previewContainer.appendChild(img);
+                } else {
+                    previewContainer.innerHTML = `
+                        <div class="placeholder-spinner">
+                            <div class="spinner-border spinner-border-sm text-secondary" role="status">
+                                <span class="visually-hidden">Loading preview...</span>
+                            </div>
+                        </div>`;
+                }
+                
+                const exploreBtn = modelCard.querySelector('.explore-model-btn');
+                exploreBtn.href = `/explorer/${model.id}`;
+                
+                modelsContainer.appendChild(modelCard);
+            } else {
+                // List view
+                const modelRow = modelRowTemplate.content.cloneNode(true);
+                modelRow.querySelector('.model-name').textContent = model.name;
+                modelRow.querySelector('.model-description').textContent = model.description || 'No description available';
+                
+                const exploreBtn = modelRow.querySelector('.explore-model-btn');
+                exploreBtn.href = `/explorer/${model.id}`;
+                
+                modelsContainer.appendChild(modelRow);
+            }
+        });
+        
+        // Update pagination
+        renderPagination();
+        
+        // After rendering, lazily load preview images for visible models
+        lazyLoadModelPreviews();
+        
+        // Setup image zoom functionality
+        setupImageZoom();
+    }
+    
+    // Fixed image zoom functionality that only zooms where mouse position is during scroll
+    function setupImageZoom() {
+        const previewImages = document.querySelectorAll('.preview-image');
+        previewImages.forEach(img => {
+            // Store original dimensions for better zoom calculation
+            img.dataset.originalWidth = img.naturalWidth;
+            img.dataset.originalHeight = img.naturalHeight;
+            
+            // Track current zoom level
+            let currentZoom = 1;
+            let isZoomed = false;
+            
+            // Initial hover effect - enlarge image with centered zoom
+            img.addEventListener('mouseenter', function() {
+                if (!isZoomed) {
+                    // Default hover zoom for regular models (subtle)
+                    currentZoom = 1.1;
+                    this.classList.add('zoom-enabled');
+                    
+                    // Always use center transform origin
+                    this.style.transformOrigin = 'center center';
+                    
+                    // Apply initial zoom
+                    this.style.transform = `scale(${currentZoom})`;
+                    this.style.zIndex = '100';
+                }
+            });
+            
+            // Mouse leave - restore original size
+            img.addEventListener('mouseleave', function() {
+                this.classList.remove('zoom-enabled');
+                isZoomed = false;
+                currentZoom = 1;
+                this.style.transform = 'scale(1)';
+                this.style.zIndex = '1';
+                this.style.transformOrigin = 'center center';
+            });
+            
+            // Mouse wheel - adjust zoom level with subtle increments
+            img.addEventListener('wheel', function(e) {
+                e.preventDefault();
+                
+                // Mark as actively zoomed
+                isZoomed = true;
+                this.classList.add('zoom-enabled');
+                
+                // Always use center transform origin
+                this.style.transformOrigin = 'center center';
+                
+                // Get current scale
+                let currentScale = 1.1; // default hover zoom
+                if (this.style.transform) {
+                    const match = this.style.transform.match(/scale\(([0-9.]+)\)/);
+                    if (match && match[1]) {
+                        currentScale = parseFloat(match[1]);
+                    }
+                }
+                
+                // Update zoom level with small increments
+                const scaleDelta = e.deltaY * -0.002; // Subtle increments
+                currentZoom = Math.max(1, Math.min(6, currentScale + scaleDelta));
+                
+                // Apply new zoom
+                this.style.transform = `scale(${currentZoom})`;
+            });
+        });
+    }
+    
+    // Lazily load preview images for visible models
+    function lazyLoadModelPreviews() {
+        // Only get containers without images
+        const previewContainers = document.querySelectorAll('.model-preview-container:not(:has(img.preview-image))');
+        
+        Array.from(previewContainers).forEach(async (container) => {
+            const modelPath = container.dataset.modelPath;
+            if (!modelPath) return;
+            
+            try {
+                // Use cached mediaFiles if available
+                const cacheKey = `mediaFiles_${encodeURIComponent(modelPath)}`;
+                let mediaFiles;
+                const cached = localStorage.getItem(cacheKey);
+                if (cached) {
+                    try {
+                        mediaFiles = JSON.parse(cached);
+                    } catch (e) {
+                        // Invalid cache, fetch again
+                    }
+                }
+                
+                // If no cache, fetch from API
+                if (!mediaFiles) {
+                    const response = await Auth.fetch(`/api/v1/explorer/media-files/?path=${encodeURIComponent(modelPath)}`);
+                    
+                    if (!response.ok) {
+                        return;
+                    }
+                    
+                    mediaFiles = await response.json();
+                    try {
+                        localStorage.setItem(cacheKey, JSON.stringify(mediaFiles));
+                    } catch (e) {
+                        console.warn("Local storage quota exceeded, can't cache media files");
+                    }
+                }
+                
+                // Find first image for preview
+                const previewImage = mediaFiles.find(file => file.media_type && file.media_type.startsWith('image/'));
+                
+                if (previewImage) {
+                    const img = document.createElement('img');
+                    img.className = 'img-fluid preview-image';
+                    img.alt = 'Model preview';
+                    img.src = `/api/v1/files/download?path=${encodeURIComponent(previewImage.path)}`;
+                    
+                    // Replace loading spinner
+                    container.innerHTML = '';
+                    container.appendChild(img);
+                    
+                    // Apply zoom to new image
+                    setupImageZoom();
+                }
+            } catch (error) {
+                console.error(`Error loading media:`, error);
+                container.innerHTML = '';
+            }
+        });
+    }
+    
+    // Search input handler with debounce
+    let searchDebounceTimer;
+    modelSearch.addEventListener('input', (e) => {
+        clearTimeout(searchDebounceTimer);
+        searchDebounceTimer = setTimeout(() => {
+            applySearchFilter(e.target.value);
+        }, 300);
+    });
+    
+    // Set initial search value from URL
+    if (urlParams.has('search')) {
+        const searchTerm = urlParams.get('search');
+        if (searchTerm) {
+            modelSearch.value = searchTerm;
+            lastSearchTerm = searchTerm.toLowerCase().trim();
+        }
+    }
+    
+    // Refresh button handler
+    refreshButton.addEventListener('click', () => {
+        loadModels(true);
+    });
+    
+    // Toggle view between grid and list
+    toggleViewBtn.addEventListener('click', function() {
+        if (currentView === 'grid') {
+            currentView = 'list';
+            this.innerHTML = '<i class="bi bi-grid"></i> Grid View';
+            this.dataset.view = 'list';
+        } else {
+            currentView = 'grid';
+            this.innerHTML = '<i class="bi bi-list"></i> List View';
+            this.dataset.view = 'grid';
+        }
+        updateUrlParams();
+        renderCurrentPage();
+    });
+    
+    // Initial load
+    loadModels();
+});
 </script>
 {% endblock %}

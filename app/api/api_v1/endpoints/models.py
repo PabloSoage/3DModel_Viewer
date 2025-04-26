@@ -11,7 +11,7 @@ import threading
 
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_, or_, func
 from sqlalchemy.orm import joinedload
 
 from app.core.auth import (
@@ -383,6 +383,25 @@ async def read_models(
     # Add process ID to logs to help debug multi-worker issues
     pid = os.getpid()
     logger.info(f"Models requested by user {current_user.username} (admin: {current_user.is_admin}), force_refresh: {force_refresh}, process: {pid}")
+    
+    # First get the total count for pagination headers
+    if current_user.is_admin:
+        # For admin, total is all models
+        count_result = await db.execute(select(func.count(Model.id)))
+        total_count = count_result.scalar_one()
+    else:
+        # For regular users, count only models they have access to
+        count_query = select(func.count(Model.id)).join(
+            user_model_permissions,
+            Model.id == user_model_permissions.c.model_id
+        ).where(
+            user_model_permissions.c.user_id == current_user.id
+        )
+        count_result = await db.execute(count_query)
+        total_count = count_result.scalar_one()
+    
+    # Set the total count in response header for client pagination
+    response.headers['X-Total-Count'] = str(total_count)
     
     # Check if we should use cached data
     if not force_refresh:

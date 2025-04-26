@@ -95,7 +95,6 @@ body {
     justify-content: center;
     background-color: #f8f9fa;
     border-radius: 12px;
-    --hover-scale: 2.2; /* Store the hover scale as a custom property */
     overflow: visible !important;
 }
 
@@ -109,24 +108,24 @@ body {
     box-shadow: 0 0 0 1px rgba(0,0,0,0.05);
 }
 
-/* Enlarge model preview on hover with improved quality - FIXED ZOOM */
+/* Enlarge model preview on hover with improved quality - REDUCED SCALE FACTOR */
 .model-preview-container img:hover {
     position: relative;
-    transform: scale(var(--hover-scale));
+    transform: scale(1.05); /* Reduced from 1.1 to 1.05 for subtler effect */
     transform-origin: center center;
     transition: transform 0.2s ease-in-out;
     z-index: 100; /* Higher z-index to ensure it shows above other elements */
-    box-shadow: 0 5px 25px rgba(0,0,0,0.5); /* Stronger shadow effect */
-    image-rendering: -webkit-optimize-contrast; /* Improve image quality in Chrome */
-    image-rendering: crisp-edges; /* Improve image quality in Firefox */
-    image-rendering: pixelated; /* Alternative rendering for some browsers */
+    box-shadow: 0 5px 25px rgba(0,0,0,0.3); /* Better shadow */
+    image-rendering: auto !important; /* Ensure high quality zoom */
     backface-visibility: hidden; /* Reduce blurriness during transform */
     cursor: zoom-in; /* Change cursor to indicate zoom functionality */
 }
 
 /* Higher quality rendering for zoomed images */
 .preview-image {
-    image-rendering: auto;
+    image-rendering: auto !important;
+    transform-style: preserve-3d; /* Better quality when scaled */
+    will-change: transform; /* Optimize browser rendering */
 }
 
 /* Placeholder styling */
@@ -186,4 +185,97 @@ body {
 
 .file-list-container .list-group-item:last-child {
     border-bottom: none;
+}
+
+/* Control bar sizing fixes */
+.input-group-text, .form-control, .form-select, .btn {
+    height: 38px; /* Consistent height */
+}
+
+/* Make sure all elements in the control bar have the same height */
+.d-flex.justify-content-end.align-items-center {
+    height: 38px;
+}
+
+/* Fix models count badge style */
+.badge.bg-info {
+    font-size: 0.75rem;
+    font-weight: normal;
+    vertical-align: middle;
+    margin-left: 8px;
+}
+
+/* Improve spacing in the top control bar */
+.d-flex.justify-content-end.align-items-center.gap-3 {
+    gap: 0.75rem !important;
+}
+
+/* Ensure "Show" dropdown has enough space */
+.input-group .form-select[id="models-per-page"] {
+    min-width: 80px !important; /* Wider to ensure no overlap */
+    padding-right: 1.75rem; /* More space for arrow */
+    text-align: center;
+}
+
+/* Show label needs more room */
+.input-group-text {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+    white-space: nowrap;
+}
+
+/* Make search bar a bit narrower to make space */
+#model-search {
+    max-width: 230px;
+}
+
+/* Enhanced image zoom functionality for admin models - now centered */
+.admin-models .model-preview-container img:hover {
+    position: relative;
+    transform: scale(2.2); /* Higher initial zoom for admin */
+    transform-origin: center center; /* Always centered zoom */
+    transition: transform 0.2s ease-in-out;
+    z-index: 100;
+    box-shadow: 0 5px 25px rgba(0,0,0,0.3);
+    image-rendering: auto !important;
+    backface-visibility: hidden;
+    cursor: zoom-in;
+}
+
+/* Enhanced image zoom functionality for regular models - now centered */
+.regular-models .model-preview-container img:hover {
+    position: relative;
+    transform: scale(1.1); /* Subtle zoom for regular models */
+    transform-origin: center center; /* Always centered zoom */
+    transition: transform 0.2s ease-in-out;
+    z-index: 100;
+    box-shadow: 0 5px 25px rgba(0,0,0,0.3);
+    image-rendering: auto !important;
+    backface-visibility: hidden;
+    cursor: zoom-in;
+}
+
+/* Higher quality rendering for zoomed images */
+.preview-image {
+    image-rendering: auto !important;
+    transform-style: preserve-3d; /* Better quality when scaled */
+    will-change: transform; /* Optimize browser rendering */
+    max-width: 100%;
+    max-height: 100%;
+}
+
+/* Additional class for images with active scroll zoom */
+.zoomed-by-scroll {
+    transition: none !important; /* Disable transition for smoother scroll zoom */
+}
+
+/* Show dropdown fix - prevent it overlapping with other elements */
+.dropdown-container {
+    position: relative; /* Contain the dropdown */
+}
+
+/* Make all items in the action bar have consistent sizing */
+.action-bar .input-group {
+    width: auto;
+    flex-shrink: 0;
 }

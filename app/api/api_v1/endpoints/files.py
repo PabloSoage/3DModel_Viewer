@@ -6,6 +6,9 @@ import shutil
 import subprocess
 import uuid
 from pathlib import Path
+import logging
+import glob
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from fastapi.responses import FileResponse, StreamingResponse
@@ -22,7 +25,93 @@ from app.models.models import User, Model
 from app.api.api_v1.endpoints.explorer import check_path_permission
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
+# Path to a fallback image to use when a requested image is not found
+FALLBACK_IMAGE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 
+                                   "../../../../static/img/image-not-found.png")
+
+def normalize_path(path):
+    """
+    Normalize file path considering case sensitivity issues and special characters.
+    This function tries to find the actual case-sensitive path if the provided one doesn't exist.
+    """
+    if os.path.exists(path):
+        return path
+    
+    # For debugging
+    logger.info(f"Path doesn't exist, attempting normalization: {path}")
+    
+    # Try more aggressive path matching first
+    drive, tail = os.path.splitdrive(path)
+    # On Windows, ensure correct drive letter case
+    if drive and os.name == 'nt':
+        drive = drive.upper()
+    
+    # Split into components and reconstruct with correct case
+    parts = Path(tail).parts
+    current = Path(drive + os.sep if drive else os.sep)
+    
+    for part in parts:
+        if not current.exists():
+            logger.warning(f"Path component doesn't exist: {current}")
+            return path
+        
+        # Skip empty parts
+        if not part:
+            continue
+            
+        # Special case for comparing with all lowercase or all uppercase
+        lower_part = part.lower()
+        upper_part = part.upper()
+        
+        # Try exact match first
+        exact_match = current / part
+        if exact_match.exists():
+            current = exact_match
+            continue
+        
+        # Try normalized path matching (case-insensitive)
+        found = False
+        try:
+            for entry in os.scandir(current):
+                # Try case-insensitive comparison first - fastest and most direct approach
+                if entry.name.lower() == lower_part:
+                    current = current / entry.name
+                    found = True
+                    break
+            
+            if not found:
+                # Try more aggressive fuzzy matching on last component (for filenames with spaces/parentheses)
+                # This is especially useful for image files that might have variants like (1), etc.
+                logger.warning(f"No exact case-insensitive match for '{part}' in {current}")
+                
+                # Special case for last component (could be a file with different naming convention)
+                if part == parts[-1]:
+                    pattern = re.sub(r'[\s\(\)]+', '.*', re.escape(lower_part))
+                    for entry in os.scandir(current):
+                        if re.search(pattern, entry.name.lower()):
+                            logger.info(f"Fuzzy matched {part} to {entry.name}")
+                            current = current / entry.name
+                            found = True
+                            break
+                
+                if not found:
+                    logger.warning(f"Component '{part}' not found in {current}")
+                    return path
+                
+        except (PermissionError, FileNotFoundError) as e:
+            logger.warning(f"Cannot list directory {current}: {str(e)}")
+            return path
+            
+    # Check if the final path exists
+    norm_path = str(current)
+    if os.path.exists(norm_path):
+        logger.info(f"Successfully normalized to existing path: {norm_path}")
+        return norm_path
+    else:
+        logger.warning(f"Normalized path still doesn't exist: {norm_path}")
+        return path
 
 @router.get("/download")
 async def download_file(
@@ -38,12 +127,8 @@ async def download_file(
     # Normalize the path
     path = os.path.normpath(path)
     
-    # Check if the path exists
-    if not os.path.exists(path):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="File not found",
-        )
+    # Log the request for debugging
+    logger.info(f"File download requested: {path}")
     
     # Check if the user has access to the path
     if not check_path_permission(path, current_user, db):
@@ -52,6 +137,34 @@ async def download_file(
             detail="Not enough permissions to access this file",
         )
     
+    # Check if the path exists
+    if not os.path.exists(path):
+        # Try to find the file with correct case
+        original_path = path
+        path = normalize_path(path)
+        logger.info(f"Normalized path: {path} (original: {original_path})")
+        
+        # If it still doesn't exist, return fallback or error
+        if not os.path.exists(path):
+            logger.warning(f"File not found: {path}")
+            
+            # If it's an image request, return a fallback image
+            mime_type, _ = mimetypes.guess_type(path)
+            if mime_type and mime_type.startswith('image/'):
+                if os.path.exists(FALLBACK_IMAGE_PATH):
+                    logger.info(f"Returning fallback image for {path}")
+                    return FileResponse(
+                        path=FALLBACK_IMAGE_PATH,
+                        filename=os.path.basename(path),
+                        media_type="image/png"
+                    )
+            
+            # Otherwise, return a 404
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="File not found",
+            )
+    
     # Check if the path is a file
     if os.path.isdir(path):
         raise HTTPException(
@@ -59,11 +172,42 @@ async def download_file(
             detail="Path is a directory, not a file",
         )
     
-    return FileResponse(
-        path=path,
-        filename=os.path.basename(path),
-        media_type="application/octet-stream"
-    )
+    # Additional check if file actually exists and is readable
+    try:
+        with open(path, "rb") as f:
+            # Just check if we can open the file
+            pass
+    except (PermissionError, IOError) as e:
+        logger.error(f"Error accessing file {path}: {str(e)}")
+        
+        # If it's an image, return the fallback
+        mime_type, _ = mimetypes.guess_type(path)
+        if mime_type and mime_type.startswith('image/'):
+            if os.path.exists(FALLBACK_IMAGE_PATH):
+                logger.info(f"Returning fallback image due to access error for {path}")
+                return FileResponse(
+                    path=FALLBACK_IMAGE_PATH,
+                    filename=os.path.basename(path),
+                    media_type="image/png"
+                )
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to access file",
+        )
+    
+    try:
+        return FileResponse(
+            path=path,
+            filename=os.path.basename(path),
+            media_type=mimetypes.guess_type(path)[0] or "application/octet-stream"
+        )
+    except Exception as e:
+        logger.error(f"Error serving file {path}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error serving file: {str(e)}",
+        )
 
 
 @router.get("/download-zip")
