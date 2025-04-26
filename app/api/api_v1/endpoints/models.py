@@ -3,7 +3,11 @@ import os
 import logging
 import asyncio
 import time
+import json
+import tempfile
+from pathlib import Path
 from datetime import datetime
+import threading
 
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +28,14 @@ router = APIRouter()
 # Set up logger
 logger = logging.getLogger(__name__)
 
+# File-based cache paths for sharing between workers
+CACHE_DIR = os.path.join(tempfile.gettempdir(), "3dmodelviewer_cache")
+ADMIN_MODELS_CACHE_FILE = os.path.join(CACHE_DIR, "admin_models_cache.json")
+PERMISSION_CACHE_PREFIX = os.path.join(CACHE_DIR, "perm_")
+
+# Create cache directory if it doesn't exist
+os.makedirs(CACHE_DIR, exist_ok=True)
+
 # In-memory cache for models - global singleton
 class ModelsCache:
     def __init__(self):
@@ -33,9 +45,217 @@ class ModelsCache:
         self.last_sync = None   # When was the last sync performed
         self.syncing_lock = asyncio.Lock()  # Lock for concurrent sync operations
         self.sync_in_progress = False       # Flag for sync status
+        self._process_id = os.getpid()  # Store the process ID for debugging
+        logger.info(f"ModelsCache initialized in process {self._process_id}")
+        logger.info(f"Using shared file cache directory: {CACHE_DIR}")
+        
+    def update_admin_models(self, models):
+        """Update admin models cache in a consistent way"""
+        if not models:
+            logger.warning(f"Attempted to update admin models cache with empty list (process {self._process_id})")
+            return
+            
+        self.admin_models = list(models)  # Make a copy to prevent reference issues
+        logger.info(f"Admin models cache updated with {len(models)} models in process {self._process_id}")
+        
+        # Also write to file-based cache
+        try:
+            # Prepare serializable data
+            serializable_models = []
+            for model in models:
+                model_dict = {
+                    'id': model.id,
+                    'name': model.name,
+                    'path': model.path,
+                    'description': model.description,
+                    'preview_image': model.preview_image,
+                    'created_at': model.created_at.isoformat() if model.created_at else None,
+                    'updated_at': model.updated_at.isoformat() if model.updated_at else None,
+                }
+                serializable_models.append(model_dict)
+                
+            # Write atomically using a temporary file
+            temp_file = f"{ADMIN_MODELS_CACHE_FILE}.tmp"
+            with open(temp_file, 'w') as f:
+                json.dump({
+                    'timestamp': time.time(),
+                    'models': serializable_models
+                }, f)
+            
+            # Replace the actual cache file (atomic operation on most systems)
+            os.replace(temp_file, ADMIN_MODELS_CACHE_FILE)
+            logger.info(f"Wrote {len(models)} models to shared file cache")
+        except Exception as e:
+            logger.error(f"Error writing to file cache: {str(e)}")
+        
+    def get_admin_models(self):
+        """Get admin models from cache, checking file cache first if memory cache is empty"""
+        if self.admin_models:
+            logger.info(f"Using {len(self.admin_models)} admin models from memory cache in process {self._process_id}")
+            return self.admin_models
+            
+        # Memory cache is empty, try file cache
+        try:
+            if os.path.exists(ADMIN_MODELS_CACHE_FILE):
+                file_age = time.time() - os.path.getmtime(ADMIN_MODELS_CACHE_FILE)
+                
+                # Only use file cache if it's fresh enough (less than 5 minutes old)
+                if file_age < 300:  # 5 minutes
+                    with open(ADMIN_MODELS_CACHE_FILE, 'r') as f:
+                        cache_data = json.load(f)
+                    
+                    if 'models' in cache_data:
+                        logger.info(f"Loading {len(cache_data['models'])} models from shared file cache (age: {int(file_age)}s)")
+                        
+                        # Convert JSON models to Model objects
+                        from app.models.models import Model
+                        models = []
+                        for model_dict in cache_data['models']:
+                            # Create Model object with proper datetime conversion
+                            model = Model(
+                                id=model_dict['id'],
+                                name=model_dict['name'],
+                                path=model_dict['path'],
+                                description=model_dict['description'],
+                                preview_image=model_dict['preview_image']
+                            )
+                            
+                            # Explicitly convert ISO format strings to datetime objects
+                            if model_dict['created_at']:
+                                model.created_at = datetime.fromisoformat(model_dict['created_at'])
+                            if model_dict['updated_at']:
+                                model.updated_at = datetime.fromisoformat(model_dict['updated_at'])
+                            
+                            models.append(model)
+                        
+                        # Update the memory cache
+                        self.admin_models = models
+                        return self.admin_models
+                else:
+                    logger.info(f"Shared file cache exists but is too old ({int(file_age)}s)")
+            else:
+                logger.info("Shared file cache does not exist")
+        except Exception as e:
+            logger.error(f"Error reading from file cache: {str(e)}")
+        
+        logger.info(f"Admin models cache is empty in process {self._process_id}")
+        return None
+    
+    def get_model_permissions(self, model_id):
+        """Get model permissions, checking file cache first if memory cache is empty"""
+        if model_id in self.model_permissions:
+            logger.info(f"Using permissions for model {model_id} from memory cache")
+            return self.model_permissions[model_id]
+            
+        # Try file cache
+        perm_file = f"{PERMISSION_CACHE_PREFIX}{model_id}.json"
+        try:
+            if os.path.exists(perm_file):
+                file_age = time.time() - os.path.getmtime(perm_file)
+                
+                # Only use file cache if it's fresh enough (less than 10 minutes old)
+                if file_age < 600:  # 10 minutes
+                    with open(perm_file, 'r') as f:
+                        cache_data = json.load(f)
+                    
+                    if 'user_ids' in cache_data:
+                        logger.info(f"Loading permissions for model {model_id} from file cache (age: {int(file_age)}s)")
+                        user_ids = cache_data['user_ids']
+                        
+                        # Update memory cache
+                        self.model_permissions[model_id] = user_ids
+                        return user_ids
+                else:
+                    logger.info(f"File cache for model {model_id} permissions exists but is too old ({int(file_age)}s)")
+        except Exception as e:
+            logger.error(f"Error reading permissions from file cache: {str(e)}")
+            
+        return None
+        
+    def update_model_permissions(self, model_id, user_ids):
+        """Update model permissions in both memory and file cache"""
+        self.model_permissions[model_id] = user_ids
+        
+        # Also update file cache
+        perm_file = f"{PERMISSION_CACHE_PREFIX}{model_id}.json"
+        try:
+            # Write atomically
+            temp_file = f"{perm_file}.tmp"
+            with open(temp_file, 'w') as f:
+                json.dump({
+                    'timestamp': time.time(),
+                    'user_ids': user_ids
+                }, f)
+            
+            # Replace the actual cache file (atomic operation on most systems)
+            os.replace(temp_file, perm_file)
+            logger.info(f"Updated permissions for model {model_id} in file cache")
+        except Exception as e:
+            logger.error(f"Error writing permissions to file cache: {str(e)}")
+    
+    def clear(self):
+        """Clear all caches"""
+        prev_admin_count = len(self.admin_models) if self.admin_models else 0
+        prev_user_count = len(self.user_models) if self.user_models else 0
+        prev_perm_count = len(self.model_permissions) if self.model_permissions else 0
+        
+        self.admin_models = []
+        self.user_models = {}
+        self.model_permissions = {}
+        self.last_sync = None
+        
+        # Also clear file caches
+        try:
+            if os.path.exists(ADMIN_MODELS_CACHE_FILE):
+                os.remove(ADMIN_MODELS_CACHE_FILE)
+                
+            # Clear permission cache files
+            for file in os.listdir(CACHE_DIR):
+                if file.startswith("perm_") and file.endswith(".json"):
+                    os.remove(os.path.join(CACHE_DIR, file))
+                    
+            logger.info(f"Cleared file caches in {CACHE_DIR}")
+        except Exception as e:
+            logger.error(f"Error clearing file caches: {str(e)}")
+        
+        logger.warning(f"Cache cleared in process {self._process_id}: "
+                     f"admin_models({prev_admin_count}), user_models({prev_user_count}), "
+                     f"model_permissions({prev_perm_count})")
 
-# Create a global cache instance
+# Create a global cache instance - ensure it's at module level
 models_cache = ModelsCache()
+logger.info(f"ModelsCache global instance created in process {os.getpid()}")
+
+# For debugging - create endpoint to check cache status
+@router.get("/cache-status", response_model=dict)
+async def get_cache_status(
+    current_user: User = Depends(get_current_admin_user),
+) -> Any:
+    """
+    Get current cache status information.
+    Only admin users can access this endpoint.
+    """
+    return {
+        "process_id": os.getpid(),
+        "admin_models_count": len(models_cache.admin_models) if models_cache.admin_models else 0,
+        "user_models_count": len(models_cache.user_models) if models_cache.user_models else 0,
+        "permissions_count": len(models_cache.model_permissions) if models_cache.model_permissions else 0,
+        "last_sync": models_cache.last_sync,
+        "syncing_in_progress": models_cache.sync_in_progress,
+    }
+
+# Add endpoint to force-clear the cache
+@router.post("/clear-cache", response_model=dict)
+async def force_clear_cache(
+    current_user: User = Depends(get_current_admin_user),
+) -> Any:
+    """
+    Force clear all caches.
+    Only admin users can access this endpoint.
+    """
+    # Clear both memory and file cache
+    models_cache.clear()
+    return {"status": "success", "message": "All caches cleared (memory and file cache)"}
 
 async def sync_discover_models(db: AsyncSession, force_refresh=False):
     """
@@ -45,16 +265,17 @@ async def sync_discover_models(db: AsyncSession, force_refresh=False):
     """
     # If sync is already in progress, wait for it to complete
     if models_cache.sync_in_progress and not force_refresh:
-        logger.info("Another sync is in progress, waiting for it to complete")
+        logger.info(f"Another sync is in progress in process {os.getpid()}, waiting for it to complete")
         async with models_cache.syncing_lock:
             # By the time we acquire the lock, sync should be complete
-            logger.info("Using results from previous sync operation")
+            logger.info(f"Using results from previous sync operation in process {os.getpid()}")
             return
     
     async with models_cache.syncing_lock:
         try:
             # Only set if we actually acquired the lock
             models_cache.sync_in_progress = True
+            logger.info(f"Starting model directory synchronization in process {os.getpid()}")
             
             # Check if we need to refresh
             current_time = time.time()
@@ -129,8 +350,10 @@ async def sync_discover_models(db: AsyncSession, force_refresh=False):
             
             # If any changes were made, invalidate the cache
             if added_count > 0 or removed_count > 0:
-                models_cache.admin_models = []
-                models_cache.user_models = {}
+                logger.info(f"Cache invalidated due to changes: {added_count} added, {removed_count} removed in process {os.getpid()}")
+                models_cache.clear()  # Use the new clear method
+            else:
+                logger.info(f"No changes to models, cache remains valid in process {os.getpid()}")
             
             # Update last sync time
             models_cache.last_sync = time.time()
@@ -138,6 +361,7 @@ async def sync_discover_models(db: AsyncSession, force_refresh=False):
         finally:
             # Always clear the sync flag when done
             models_cache.sync_in_progress = False
+            logger.info(f"Model synchronization completed in process {os.getpid()}")
 
 @router.get("/", response_model=List[ModelSchema])
 async def read_models(
@@ -153,21 +377,32 @@ async def read_models(
     Only returns models that the current user has access to.
     Admin users can see all models.
     """
-    # Prevent caching so updates to base dir are reflected immediately
+    # Prevent browser caching so updates to base dir are reflected immediately
     response.headers['Cache-Control'] = 'no-store'
+    
+    # Add process ID to logs to help debug multi-worker issues
+    pid = os.getpid()
+    logger.info(f"Models requested by user {current_user.username} (admin: {current_user.is_admin}), force_refresh: {force_refresh}, process: {pid}")
     
     # Check if we should use cached data
     if not force_refresh:
-        if current_user.is_admin and models_cache.admin_models:
-            logger.info("Using cached admin models")
-            # Return from cache, respecting pagination
-            models_subset = models_cache.admin_models[skip:skip+limit]
-            return models_subset
-        elif not current_user.is_admin and current_user.id in models_cache.user_models:
+        if current_user.is_admin:
+            cached_models = models_cache.get_admin_models()
+            if cached_models:
+                logger.info(f"Using cached admin models: {len(cached_models)} models available in process {pid}")
+                # Return a copy of the cache to prevent modification - important!
+                models_subset = list(cached_models)[skip:skip+limit]
+                return models_subset
+            logger.info(f"Admin models cache miss in process {pid}, fetching from database")
+        elif current_user.id in models_cache.user_models:
             logger.info(f"Using cached models for user {current_user.id}")
             # Return from cache, respecting pagination
             models_subset = models_cache.user_models[current_user.id][skip:skip+limit]
             return models_subset
+        else:
+            logger.info(f"Cache miss for user {current_user.id}, fetching from database")
+    else:
+        logger.info(f"Force refresh requested in process {pid}, bypassing cache")
     
     # Sync filesystem models into database if needed
     await sync_discover_models(db, force_refresh=force_refresh)
@@ -176,9 +411,10 @@ async def read_models(
     if current_user.is_admin:
         # Admin users can see all models, now sorted alphabetically by name
         result = await db.execute(select(Model).order_by(Model.name))
-        models = result.scalars().all()
+        models = list(result.scalars().all())  # Convert to list to ensure it's a collection
         # Cache all models for admin users
-        models_cache.admin_models = models
+        models_cache.update_admin_models(models)
+        logger.info(f"Admin models fetched and cached: {len(models)} models in process {pid}")
         return models[skip:skip+limit]
     else:
         # Regular users can only see models they have access to
@@ -193,6 +429,7 @@ async def read_models(
         models = result.scalars().all()
         # Cache models for this specific user
         models_cache.user_models[current_user.id] = models
+        logger.info(f"User {current_user.id} models fetched and cached: {len(models)} models")
         return models[skip:skip+limit]
 
 
@@ -389,9 +626,11 @@ async def read_model_permissions(
     Uses caching to avoid repeated database queries for the same model.
     """
     # Check cache first if not forcing refresh
-    if not force_refresh and model_id in models_cache.model_permissions:
-        logger.info(f"Using cached permissions for model {model_id}")
-        return models_cache.model_permissions[model_id]
+    if not force_refresh:
+        # First check memory cache, then file cache
+        cached_permissions = models_cache.get_model_permissions(model_id)
+        if cached_permissions is not None:
+            return cached_permissions
     
     # Verify model exists
     result = await db.execute(select(Model).where(Model.id == model_id))
@@ -410,8 +649,8 @@ async def read_model_permissions(
     result = await db.execute(query)
     user_ids = [row[0] for row in result.fetchall()]
     
-    # Cache the permissions
-    models_cache.model_permissions[model_id] = user_ids
+    # Cache the permissions (both memory and file cache)
+    models_cache.update_model_permissions(model_id, user_ids)
     logger.info(f"Cached permissions for model {model_id}")
     
     return user_ids

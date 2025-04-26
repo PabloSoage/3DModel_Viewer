@@ -490,9 +490,22 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     }
     
-    // Load all models
+    // Load all models - add cache diagnostics and recovery
     async function loadAllModels() {
         try {
+            console.log('Loading models for user permissions management');
+            // Check cache status first to help diagnose issues
+            try {
+                const statusResponse = await Auth.fetch('/api/v1/models/cache-status');
+                if (statusResponse && statusResponse.ok) {
+                    const status = await statusResponse.json();
+                    console.log('Current cache status:', status);
+                }
+            } catch (e) {
+                console.warn('Could not fetch cache status:', e);
+            }
+            
+            // First attempt - try to get from cache
             const response = await Auth.fetch('/api/v1/models?limit=10000');
             
             if (!response) {
@@ -505,6 +518,29 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
             
             allModels = await response.json();
+            
+            // Log model count
+            console.log(`Loaded ${allModels.length} models for permissions management`);
+            
+            // If we got no models, try clearing the cache and forcing refresh
+            if (allModels.length === 0) {
+                console.warn('No models returned, attempting to clear cache and reload');
+                // Try to clear the cache
+                try {
+                    await Auth.fetch('/api/v1/models/clear-cache', { method: 'POST' });
+                    console.log('Cache cleared, reloading models with force_refresh');
+                    
+                    // Retry with force_refresh
+                    const retryResp = await Auth.fetch('/api/v1/models?limit=10000&force_refresh=true');
+                    if (retryResp && retryResp.ok) {
+                        allModels = await retryResp.json();
+                        console.log(`Retry successful, loaded ${allModels.length} models`);
+                    }
+                } catch (e) {
+                    console.error('Cache clear and retry attempt failed:', e);
+                }
+            }
+            
             return allModels;
         } catch (error) {
             console.error('Error loading models:', error);
