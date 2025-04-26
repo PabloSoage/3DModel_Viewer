@@ -164,6 +164,120 @@
 
 {% block extra_js %}
 <script>
+    // Define loadUsers outside of the DOMContentLoaded handler so it can be called globally
+    async function loadUsers() {
+        try {
+            console.log("Loading users for permissions management...");
+            const token = localStorage.getItem('token');
+            const response = await Auth.fetch('/api/v1/users/', {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+            
+            if (!response || !response.ok) {
+                console.warn("Failed to load users or unauthorized");
+                return [];
+            }
+            
+            const users = await response.json();
+            console.log(`Loaded ${users.length} users for permissions management`);
+            return users;
+        } catch (error) {
+            console.error('Error loading users:', error);
+            return [];
+        }
+    }
+
+    // Function to open the manage model access modal
+    async function openManageModelModal(modelId, modelName) {
+        // Set model name in modal
+        document.getElementById('manageModelModalLabel').textContent = `Manage Access: ${modelName}`;
+        document.querySelector('#manageModelModal .modal-body h6.model-name').textContent = modelName;
+        
+        // Store model ID for later use
+        document.getElementById('save-permissions-button').dataset.modelId = modelId;
+        
+        // Show loading state
+        document.getElementById('model-permissions-container').innerHTML = `
+            <div class="text-center py-3">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading users...</span>
+                </div>
+                <p class="mt-2">Loading users and permissions...</p>
+            </div>
+        `;
+        
+        // Show modal
+        const manageModelModal = new bootstrap.Modal(document.getElementById('manageModelModal'));
+        manageModelModal.show();
+        
+        try {
+            // Load users
+            const users = await loadUsers();
+            
+            // Load permissions for this model - always force refresh to get updated data
+            const permissions = await loadModelPermissions(modelId, true);
+            
+            // Generate user checkboxes
+            let checkboxesHtml = '';
+            
+            if (users.length === 0) {
+                checkboxesHtml = '<div class="alert alert-info">No users found in the system.</div>';
+            } else {
+                checkboxesHtml = '<div class="list-group">';
+                users.forEach(user => {
+                    // Skip if the user is admin (they have access to everything)
+                    if (user.is_admin) {
+                        return;
+                    }
+                    
+                    const hasAccess = permissions.includes(user.id);
+                    const isActiveClass = user.is_active ? '' : 'text-muted';
+                    
+                    checkboxesHtml += `
+                    <label class="list-group-item ${isActiveClass}">
+                        <input class="form-check-input me-2" type="checkbox" value="" 
+                            id="user-${user.id}" data-user-id="${user.id}" ${hasAccess ? 'checked' : ''}>
+                        <strong>${user.username}</strong>
+                        ${user.email ? `<span class="text-muted ms-2">(${user.email})</span>` : ''}
+                        ${!user.is_active ? '<span class="badge bg-warning text-dark ms-2">Inactive</span>' : ''}
+                    </label>`;
+                });
+                checkboxesHtml += '</div>';
+            }
+            
+            // Update the container with the user checkboxes
+            document.getElementById('model-permissions-container').innerHTML = checkboxesHtml;
+            
+        } catch (error) {
+            console.error('Error loading users or permissions:', error);
+            document.getElementById('model-permissions-container').innerHTML = 
+                `<div class="alert alert-danger">Error loading data: ${error.message}</div>`;
+        }
+    }
+
+    // Load permissions for a specific model - add force_refresh parameter
+    async function loadModelPermissions(modelId, forceRefresh = false) {
+        try {
+            // Add force_refresh parameter to URL if needed
+            const url = forceRefresh ? 
+                `/api/v1/models/${modelId}/permissions?force_refresh=true` : 
+                `/api/v1/models/${modelId}/permissions`;
+                
+            const response = await Auth.fetch(url);
+            
+            if (!response.ok) {
+                throw new Error(`Failed to load permissions (status ${response.status})`);
+            }
+            
+            return await response.json();
+        } catch (error) {
+            console.error('Error loading model permissions:', error);
+            return [];
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
         // Authentication check
         const token = localStorage.getItem('token');
@@ -794,31 +908,6 @@ const MediaCache = {
             }, 300); // 300ms debounce
         });
         
-        // Fix for the "loadUsers is not defined" error:
-        // Define loadUsers function or remove the call
-        async function loadUsers() {
-            try {
-                console.log("Loading users for permissions management...");
-                const response = await Auth.fetch('/api/v1/users/', {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-                
-                if (!response || !response.ok) {
-                    console.warn("Failed to load users or unauthorized");
-                    return [];
-                }
-                
-                allUsers = await response.json();
-                console.log(`Loaded ${allUsers.length} users for permissions management`);
-                return allUsers;
-            } catch (error) {
-                console.error('Error loading users:', error);
-                return [];
-            }
-        }
-        
         // Check URL parameters for initial search term
         if (urlParams.has('search')) {
             const searchTerm = urlParams.get('search');
@@ -850,37 +939,91 @@ const MediaCache = {
         });
     });
 
-    // Toast notification function
-    function showToast(message, type = 'info') {
-        const toastContainer = document.getElementById('toast-container');
-        if (!toastContainer) {
-            const container = document.createElement('div');
-            container.id = 'toast-container';
-            container.className = 'toast-container position-fixed bottom-0 end-0 p-3';
-            document.body.appendChild(container);
+    // Add the event handler for save permissions button outside the DOMContentLoaded event
+    // This ensures it's attached properly when the modal is opened
+    document.getElementById('save-permissions-button').addEventListener('click', async function() {
+        const modelId = parseInt(this.dataset.modelId);
+        if (!modelId) {
+            showToast('Model ID not found', 'danger');
+            return;
         }
         
-        const toastId = 'toast-' + Date.now();
-        const html = `
-            <div id="${toastId}" class="toast align-items-center text-white bg-${type} border-0" role="alert" aria-live="assertive" aria-atomic="true">
-                <div class="d-flex">
-                    <div class="toast-body">
-                        ${message}
-                    </div>
-                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
-                </div>
-            </div>
-        `;
+        // Show loading state
+        const originalText = this.textContent;
+        this.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...';
+        this.disabled = true;
         
-        document.getElementById('toast-container').insertAdjacentHTML('beforeend', html);
-        const toastElement = document.getElementById(toastId);
-        const toast = new bootstrap.Toast(toastElement);
-        toast.show();
-        
-        // Auto-remove toast after it's hidden
-        toastElement.addEventListener('hidden.bs.toast', function() {
-            this.remove();
-        });
-    }
+        try {
+            const checkboxes = document.querySelectorAll('#model-permissions-container input[type="checkbox"]');
+            let successCount = 0;
+            let errorCount = 0;
+            
+            // Get current permissions to compare with new settings
+            const currentPermissions = await loadModelPermissions(modelId);
+            
+            for (const checkbox of checkboxes) {
+                const userId = parseInt(checkbox.dataset.userId);
+                const shouldHaveAccess = checkbox.checked;
+                const hasAccess = currentPermissions.includes(userId);
+                
+                // Skip if permission hasn't changed
+                if (shouldHaveAccess === hasAccess) {
+                    continue;
+                }
+                
+                try {
+                    if (shouldHaveAccess) {
+                        // Add permission
+                        await Auth.fetch('/api/v1/models/permission/add', {
+                            method: 'PUT',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                model_id: modelId,
+                                user_id: userId
+                            })
+                        });
+                    } else {
+                        // Remove permission
+                        await Auth.fetch('/api/v1/models/permission/remove', {
+                            method: 'DELETE',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                model_id: modelId,
+                                user_id: userId
+                            })
+                        });
+                    }
+                    successCount++;
+                } catch (error) {
+                    console.error(`Error updating permission for user ${userId}:`, error);
+                    errorCount++;
+                }
+            }
+            
+            // Close modal
+            bootstrap.Modal.getInstance(document.getElementById('manageModelModal')).hide();
+            
+            // Show success message
+            if (errorCount > 0) {
+                showToast(`Permissions updated with ${successCount} successes and ${errorCount} errors.`, 'warning');
+            } else if (successCount > 0) {
+                showToast(`Permissions updated successfully for ${successCount} users.`, 'success');
+            } else {
+                showToast('No permission changes were needed.', 'info');
+            }
+            
+        } catch (error) {
+            console.error('Error saving permissions:', error);
+            showToast(`Error saving permissions: ${error.message}`, 'danger');
+        } finally {
+            // Restore button state
+            this.innerHTML = originalText;
+            this.disabled = false;
+        }
+    });
 </script>
 {% endblock %}
