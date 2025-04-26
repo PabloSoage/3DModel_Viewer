@@ -556,6 +556,8 @@ document.addEventListener('DOMContentLoaded', async function() {
                     const response = await Auth.fetch(`/api/v1/explorer/media-files/?path=${encodeURIComponent(modelPath)}`);
                     
                     if (!response.ok) {
+                        // Failed to fetch media files - replace spinner with "No preview"
+                        replaceSpinnerWithNoPreviewMessage(container);
                         return;
                     }
                     
@@ -582,12 +584,26 @@ document.addEventListener('DOMContentLoaded', async function() {
                     
                     // Apply zoom to new image
                     setupImageZoom();
+                } else {
+                    // No preview image found - replace spinner with "No preview" message
+                    replaceSpinnerWithNoPreviewMessage(container);
                 }
             } catch (error) {
                 console.error(`Error loading media:`, error);
-                container.innerHTML = '';
+                // Replace spinner with "No preview" message on error
+                replaceSpinnerWithNoPreviewMessage(container);
             }
         });
+    }
+    
+    // Helper function to replace spinner with a "No preview" message
+    function replaceSpinnerWithNoPreviewMessage(container) {
+        container.innerHTML = `
+            <div class="text-center p-3 text-muted">
+                <i class="bi bi-image text-secondary" style="font-size: 2rem;"></i>
+                <p class="mt-2 mb-0 small">No preview</p>
+            </div>
+        `;
     }
     
     // Search input handler with debounce

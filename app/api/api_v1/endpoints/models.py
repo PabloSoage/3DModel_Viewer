@@ -99,8 +99,8 @@ class ModelsCache:
             if os.path.exists(ADMIN_MODELS_CACHE_FILE):
                 file_age = time.time() - os.path.getmtime(ADMIN_MODELS_CACHE_FILE)
                 
-                # Only use file cache if it's fresh enough (less than 5 minutes old)
-                if file_age < 300:  # 5 minutes
+                # Only use file cache if it's fresh enough (less than 30 minutes old)
+                if file_age < 1800:  # 30 minutes (changed from 300 - 5 minutes)
                     with open(ADMIN_MODELS_CACHE_FILE, 'r') as f:
                         cache_data = json.load(f)
                     
@@ -280,9 +280,9 @@ async def sync_discover_models(db: AsyncSession, force_refresh=False):
             # Check if we need to refresh
             current_time = time.time()
             if models_cache.last_sync and not force_refresh:
-                # If cache is less than 5 minutes old, skip sync
-                if current_time - models_cache.last_sync < 300:  # 5 minutes
-                    logger.info("Using cached model data (less than 5 minutes old)")
+                # If cache is less than 30 minutes old, skip sync (was 5 minutes before)
+                if current_time - models_cache.last_sync < 1800:  # 30 minutes
+                    logger.info("Using cached model data (less than 30 minutes old)")
                     return
             
             # Fetch dynamic base directory from settings table

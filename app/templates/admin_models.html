@@ -650,7 +650,7 @@
             lazyLoadModelPreviews();
         }
         
-        // Lazily load preview images only for visible models
+        // Lazily load preview images only for visible models - fix infinite spinner issue
         function lazyLoadModelPreviews() {
             // Only get containers that don't have images yet
             const previewContainers = document.querySelectorAll('.model-preview-container:not(:has(img.preview-image))');
@@ -678,6 +678,8 @@
                         const response = await Auth.fetch(`/api/v1/explorer/media-files/?path=${encodeURIComponent(modelPath)}`);
                         
                         if (!response.ok) {
+                            // Failed to fetch media files - replace spinner with "No preview"
+                            replaceSpinnerWithNoPreviewMessage(container);
                             return;
                         }
                         
@@ -694,29 +696,26 @@
                     
                     if (previewImage) {
                         updateModelPreview(container.dataset.modelId, previewImage.path);
+                    } else {
+                        // No preview image found - replace spinner with "No preview" message
+                        replaceSpinnerWithNoPreviewMessage(container);
                     }
                 } catch (error) {
                     console.error(`Error loading media for model:`, error);
+                    // Replace spinner with "No preview" message on error
+                    replaceSpinnerWithNoPreviewMessage(container);
                 }
             });
         }
         
-        // Update model preview with found image
-        function updateModelPreview(modelId, imagePath) {
-            const previewContainer = document.querySelector(`.model-preview-container[data-model-id="${modelId}"]`);
-            if (previewContainer) {
-                const img = document.createElement('img');
-                img.className = 'img-fluid preview-image';
-                img.alt = 'Model preview';
-                img.src = `/api/v1/files/download?path=${encodeURIComponent(imagePath)}`;
-                
-                // Replace loading spinner or placeholder with image
-                previewContainer.innerHTML = '';
-                previewContainer.appendChild(img);
-                
-                // Apply zoom functionality to this new image
-                setupImageZoom();
-            }
+        // Helper function to replace spinner with a "No preview" message
+        function replaceSpinnerWithNoPreviewMessage(container) {
+            container.innerHTML = `
+                <div class="text-center p-3 text-muted">
+                    <i class="bi bi-image text-secondary" style="font-size: 2rem;"></i>
+                    <p class="mt-2 mb-0 small">No preview</p>
+                </div>
+            `;
         }
 
         // Search input handler - use debounce to avoid too many renders on fast typing
