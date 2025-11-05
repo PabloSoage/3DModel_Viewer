@@ -323,6 +323,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (currentPage > 1) {
                 currentPage--;
                 updateUrlParams();
+                scrollToTop();
                 renderCurrentPage();
             }
         });
@@ -343,6 +344,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             firstLi.addEventListener('click', () => {
                 currentPage = 1;
                 updateUrlParams();
+                scrollToTop();
                 renderCurrentPage();
             });
             paginationControls.appendChild(firstLi);
@@ -363,6 +365,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             pageLi.addEventListener('click', () => {
                 currentPage = i;
                 updateUrlParams();
+                scrollToTop();
                 renderCurrentPage();
             });
             paginationControls.appendChild(pageLi);
@@ -383,6 +386,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             lastLi.addEventListener('click', () => {
                 currentPage = totalPages;
                 updateUrlParams();
+                scrollToTop();
                 renderCurrentPage();
             });
             paginationControls.appendChild(lastLi);
@@ -396,10 +400,19 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (currentPage < totalPages) {
                 currentPage++;
                 updateUrlParams();
+                scrollToTop();
                 renderCurrentPage();
             }
         });
         paginationControls.appendChild(nextLi);
+    }
+    
+    // Scroll to top of page smoothly
+    function scrollToTop() {
+        window.scrollTo({
+            top: 0,
+            behavior: 'smooth'
+        });
     }
     
     // Render the current page of models with filter support
