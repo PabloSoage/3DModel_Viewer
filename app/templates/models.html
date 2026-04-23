@@ -15,6 +15,14 @@
                 <span class="input-group-text"><i class="bi bi-search"></i></span>
                 <input type="text" class="form-control" id="model-search" placeholder="Search...">
             </div>
+            <!-- Sort by dropdown -->
+            <div class="input-group me-3" style="width: 160px;">
+                <label class="input-group-text" for="sort-by">Sort by</label>
+                <select class="form-select" id="sort-by">
+                    <option value="date">Date</option>
+                    <option value="name">Name</option>
+                </select>
+            </div>
             <!-- Show dropdown with increased width and fixed margin -->
             <div class="input-group me-3" style="width: 140px;">
                 <label class="input-group-text" for="models-per-page">Show</label>
@@ -139,6 +147,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     const noModelsTemplate = document.getElementById('no-models-template');
     const loadingTemplate = document.getElementById('loading-template');
     const modelsPerPageSelect = document.getElementById('models-per-page');
+    const sortBySelect = document.getElementById('sort-by');
     const modelsCount = document.getElementById('models-count');
     const paginationInfo = document.getElementById('pagination-info');
     const paginationControls = document.getElementById('pagination-controls');
@@ -155,12 +164,19 @@ document.addEventListener('DOMContentLoaded', async function() {
     let filteredModels = [];
     let currentView = 'grid'; // Default view is grid
     let lastSearchTerm = '';
+    let currentSortBy = 'date'; // Default sort by date
     
     // Set default or load from localStorage
     const storedItemsPerPage = localStorage.getItem('modelsPerPage');
     if (storedItemsPerPage) {
         itemsPerPage = parseInt(storedItemsPerPage);
         modelsPerPageSelect.value = itemsPerPage;
+    }
+    
+    const storedSortBy = localStorage.getItem('modelsSortBy');
+    if (storedSortBy) {
+        currentSortBy = storedSortBy;
+        sortBySelect.value = currentSortBy;
     }
     
     // Get current page and view from URL if present
@@ -185,6 +201,15 @@ document.addEventListener('DOMContentLoaded', async function() {
         currentPage = 1; // Reset to first page when changing items per page
         updateUrlParams();
         renderCurrentPage();
+    });
+    
+    // Listen for changes to sort by
+    sortBySelect.addEventListener('change', function() {
+        currentSortBy = this.value;
+        localStorage.setItem('modelsSortBy', currentSortBy);
+        currentPage = 1; // Reset to first page when changing sort
+        updateUrlParams();
+        loadModels(false); // Reload models with new sort order
     });
     
     // Update URL with current pagination state
@@ -238,8 +263,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         try {
             // Load all models at once for client-side filtering and pagination
             const url = forceRefresh ? 
-                '/api/v1/models?limit=10000&force_refresh=true' : 
-                '/api/v1/models?limit=10000';
+                `/api/v1/models?limit=10000&force_refresh=true&sort_by=${currentSortBy}` : 
+                `/api/v1/models?limit=10000&sort_by=${currentSortBy}`;
             
             const response = await Auth.fetch(url);
             
@@ -298,6 +323,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (currentPage > 1) {
                 currentPage--;
                 updateUrlParams();
+                scrollToTop();
                 renderCurrentPage();
             }
         });
@@ -318,6 +344,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             firstLi.addEventListener('click', () => {
                 currentPage = 1;
                 updateUrlParams();
+                scrollToTop();
                 renderCurrentPage();
             });
             paginationControls.appendChild(firstLi);
@@ -338,6 +365,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             pageLi.addEventListener('click', () => {
                 currentPage = i;
                 updateUrlParams();
+                scrollToTop();
                 renderCurrentPage();
             });
             paginationControls.appendChild(pageLi);
@@ -358,6 +386,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             lastLi.addEventListener('click', () => {
                 currentPage = totalPages;
                 updateUrlParams();
+                scrollToTop();
                 renderCurrentPage();
             });
             paginationControls.appendChild(lastLi);
@@ -371,10 +400,19 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (currentPage < totalPages) {
                 currentPage++;
                 updateUrlParams();
+                scrollToTop();
                 renderCurrentPage();
             }
         });
         paginationControls.appendChild(nextLi);
+    }
+    
+    // Scroll to top of page smoothly
+    function scrollToTop() {
+        window.scrollTo({
+            top: 0,
+            behavior: 'smooth'
+        });
     }
     
     // Render the current page of models with filter support

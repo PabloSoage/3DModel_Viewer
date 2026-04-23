@@ -377,19 +377,21 @@ async def read_models(
     skip: int = 0,
     limit: int = 100,
     current_user: User = Depends(get_current_active_user),
-    force_refresh: bool = Query(False, description="Force a refresh of models from disk")
+    force_refresh: bool = Query(False, description="Force a refresh of models from disk"),
+    sort_by: str = Query("date", description="Sort models by 'name' or 'date'")
 ) -> Any:
     """
     Retrieve models.
     Only returns models that the current user has access to.
     Admin users can see all models.
+    Can be sorted by name (alphabetically) or date (modification time of folder).
     """
     # Prevent browser caching so updates to base dir are reflected immediately
     response.headers['Cache-Control'] = 'no-store'
     
     # Add process ID to logs to help debug multi-worker issues
     pid = os.getpid()
-    logger.info(f"Models requested by user {current_user.username} (admin: {current_user.is_admin}), force_refresh: {force_refresh}, process: {pid}")
+    logger.info(f"Models requested by user {current_user.username} (admin: {current_user.is_admin}), force_refresh: {force_refresh}, sort_by: {sort_by}, process: {pid}")
     
     # First get the total count for pagination headers
     if current_user.is_admin:
@@ -438,9 +440,18 @@ async def read_models(
     
     # Fetch and cache models
     if current_user.is_admin:
-        # Admin users can see all models, now sorted alphabetically by name
-        result = await db.execute(select(Model).order_by(Model.name))
-        models = list(result.scalars().all())  # Convert to list to ensure it's a collection
+        # Admin users can see all models
+        if sort_by == "date":
+            # Sort by modification time of the folder (newest first)
+            result = await db.execute(select(Model))
+            models = list(result.scalars().all())
+            # Sort by folder modification time
+            models.sort(key=lambda m: os.path.getmtime(m.path) if os.path.exists(m.path) else 0, reverse=True)
+        else:
+            # Sort alphabetically by name
+            result = await db.execute(select(Model).order_by(Model.name))
+            models = list(result.scalars().all())
+        
         # Cache all models for admin users
         models_cache.update_admin_models(models)
         logger.info(f"Admin models fetched and cached: {len(models)} models in process {pid}")
@@ -452,10 +463,19 @@ async def read_models(
             Model.id == user_model_permissions.c.model_id
         ).where(
             user_model_permissions.c.user_id == current_user.id
-        ).order_by(Model.name)
+        )
         
-        result = await db.execute(query)
-        models = list(result.scalars().all())  # Ensure it's a proper list
+        if sort_by == "date":
+            # Sort by modification time (handled after fetching)
+            result = await db.execute(query)
+            models = list(result.scalars().all())
+            models.sort(key=lambda m: os.path.getmtime(m.path) if os.path.exists(m.path) else 0, reverse=True)
+        else:
+            # Sort alphabetically by name
+            query = query.order_by(Model.name)
+            result = await db.execute(query)
+            models = list(result.scalars().all())
+        
         # Cache models for this specific user
         models_cache.user_models[current_user.id] = models
         logger.info(f"User {current_user.id} models fetched and cached: {len(models)} models")
