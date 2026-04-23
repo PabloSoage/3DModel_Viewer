@@ -1,2 +1,110 @@
-# 3DModel_Viewer
+# 3D Model Viewer & Management API
 
+An asynchronous web application to manage, browse, and visualize 3D models (STL) and their associated files. Built with a Python backend (FastAPI) and a vanilla JavaScript/Three.js frontend.
+
+## Key Features
+
+  * **3D Visualization:** In-browser rendering of `.stl` files utilizing **Three.js**, featuring orbital controls, wireframe toggling, and auto-rotation.
+  * **Async Backend:** Asynchronous REST API built with **FastAPI** and **SQLAlchemy** (using `aiosqlite`) for non-blocking database operations.
+  * **Authentication & Authorization:** JWT (JSON Web Token) authentication with HTTP-only cookie support.
+      * Password hashing using `bcrypt`.
+      * Role-Based Access Control (RBAC): Distinct Admin and standard User privileges.
+      * Granular access control: Users only see and access 3D models explicitly assigned to them by an Administrator.
+  * **Multi-Worker Concurrency:** File-based caching mechanism and process locking (`ModelsCache`) to synchronize dynamic directory scanning across multiple Uvicorn workers.
+  * **File Explorer:** Server-side file system navigation capable of generating STL preview images via Python (`numpy-stl`/`matplotlib`) or OpenSCAD.
+
+## Technology Stack
+
+**Backend:**
+
+  * [FastAPI](https://fastapi.tiangolo.com/)
+  * [SQLAlchemy (Async)](https://www.sqlalchemy.org/)
+  * [Pydantic](https://docs.pydantic.dev/)
+  * [JWT / Passlib](https://passlib.readthedocs.io/)
+
+**Frontend:**
+
+  * [Three.js](https://threejs.org/)
+  * [Bootstrap 5](https://getbootstrap.com/)
+  * Vanilla JavaScript (ES6+)
+
+## Project Structure
+
+```text
+3DModel_Viewer/
+├── app/
+│   ├── api/api_v1/       # REST API Endpoints (Auth, Users, Models, Explorer)
+│   ├── core/             # Core logic (Security, JWT, App Config)
+│   ├── db/               # Async Database initialization and connection pool
+│   ├── models/           # SQLAlchemy ORM models
+│   ├── schemas/          # Pydantic schemas for data validation
+│   ├── static/           # CSS, JS, and generated preview images
+│   └── templates/        # Jinja2 HTML templates (Admin dashboards, Viewer)
+├── main.py               # FastAPI application factory and Uvicorn entry point
+└── requirements.txt      # Python dependencies
+```
+
+## ⚙️ Setup & Installation
+
+Tested on **Python 3.11.4** and **Python 3.12**.
+
+**1. Create a virtual environment and install dependencies:**
+
+**For Windows:**
+
+```cmd
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+**For Linux / macOS:**
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+**2. Configure Environment (Optional):**
+The application uses sensible defaults, but you can set environment variables:
+
+  * `SECRET_KEY`: Cryptographic key for JWT.
+  * `MODELS_BASE_DIR`: Path to the directory containing 3D models (Defaults to `./models`).
+
+**3. Run the application:**
+
+```bash
+python main.py
+```
+
+*The server will start on `http://0.0.0.0:8888` utilizing 4 Uvicorn workers.*
+
+## 🔐 Default Credentials
+
+On the first run, the database initializes automatically and creates a default administrator account:
+
+  * **Username:** `admin`
+  * **Password:** `admin`
+    *(Note: Change these credentials immediately upon first login).*
+
+## ⚠️ Disclaimer
+
+This software is provided "as is", without warranty of any kind. It is intended for educational, research, and personal use. Modifying access control mechanisms or deploying this application directly to the internet without proper reverse proxy configurations (e.g., Nginx) and HTTPS is at the user's own risk.
+
+## ⚖️ License
+
+Copyright (C) 2026 Pablo Soage Rodas
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see [https://www.gnu.org/licenses/](https://www.gnu.org/licenses/).
